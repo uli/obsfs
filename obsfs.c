@@ -13,6 +13,9 @@
 #include <search.h>
 #include <libgen.h>
 
+#include "obsfs.h"
+#include "hash.h"
+
 static const char *hello_str = "Hello World!\n";
 static const char *hello_path = "/hello";
 
@@ -20,9 +23,6 @@ struct options {
   char *api_username;
   char *api_password;
 } options;
-
-#define ATTR_CACHE_SIZE 32768
-struct hsearch_data attr_cache;
 
 #define OBSFS_OPT_KEY(t, p, v) { t, offsetof(struct options, p), v }
 
@@ -48,25 +48,22 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
     stbuf->st_nlink = 1;
     stbuf->st_size = strlen(hello_str);
   } else {
-    //res = -ENOENT;
-    ENTRY e;
-    ENTRY *ret;
-    e.key = path;
-    fprintf(stderr, "getattr: looking for %s\n", e.key);
-    hsearch_r(e, FIND, &ret, &attr_cache);
+    struct stat *ret;
+    fprintf(stderr, "getattr: looking for %s\n", path);
+    ret = hash_find(path);
     if (ret) {
       fprintf(stderr, "found it!\n");
-      *stbuf = *(struct stat *)(ret->data);
+      *stbuf = *ret;
     } 
     else {
       char *dir = strdup(path);
       fprintf(stderr, "not found, trying to get directory\n");
       obsfs_readdir(dirname(dir), NULL, NULL, 0, NULL);
       free(dir);
-      hsearch_r(e, FIND, &ret, &attr_cache);
+      ret = hash_find(path);
       if (ret) {
         fprintf(stderr, "found it after all\n");
-        *stbuf = *(struct stat *)(ret->data);
+        *stbuf = *ret;
       }
       else {
         stbuf->st_mode = S_IFDIR | 0755;
@@ -110,16 +107,15 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         st.st_size = atoi(atts[1]);
       }
       if (filename) {
-        ENTRY e;
-        ENTRY *re;
+        struct stat *re;
+        char *full_path;
         if (fb->filler)
           fb->filler(fb->buf, filename, &st, 0);
-        /* woohoo, memleaks! */
-        e.key = malloc(strlen(fb->path) + strlen(filename) + 2);
-        sprintf(e.key, "%s/%s", fb->path, filename);
-        e.data = malloc(sizeof(struct stat)); *((struct stat *)e.data) = st;
-        fprintf(stderr, "hashing %s\n", e.key);
-        hsearch_r(e, ENTER, &re, &attr_cache);
+        full_path = malloc(strlen(fb->path) + strlen(filename) + 2);
+        sprintf(full_path, "%s/%s", fb->path, filename);
+        fprintf(stderr, "hashing %s\n", full_path);
+        hash_add(full_path, &st);
+        free(full_path);
       }
       atts += 2;
     }
@@ -247,15 +243,12 @@ int main(int argc, char *argv[])
   if (curl_global_init(CURL_GLOBAL_ALL))
     return -1;
 
-  if (!hcreate_r(ATTR_CACHE_SIZE, &attr_cache)) {
-    perror("hcreate_r");
-    return -1;
-  }
+  hash_init();
   
   ret = fuse_main(args.argc, args.argv, &obsfs_oper, NULL);
   
   fuse_opt_free_args(&args);
-  hdestroy_r(&attr_cache);
+  hash_free();
   
   return ret;
 }
