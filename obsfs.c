@@ -83,12 +83,12 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
   return res;
 }
 
-static int in_api_dir = 0;
 struct filbuf {
   void *buf;
   fuse_fill_dir_t filler;
   const char *path;
   dir_t *cdir;
+  int in_dir;
 };
 
 static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char **atts)
@@ -97,10 +97,10 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   struct filbuf *fb = (struct filbuf *)ud;
   memset(&st, 0, sizeof(struct stat));
   if (!strcmp(name, "directory") || !strcmp(name, "binarylist")) {
-    in_api_dir = 1;
+    fb->in_dir = 1;
     return;
   }
-  if (in_api_dir && (!strcmp(name, "entry") || !strcmp(name, "binary"))) {
+  if (fb->in_dir && (!strcmp(name, "entry") || !strcmp(name, "binary"))) {
     const char *filename = NULL;
     while (*atts) {
       if (!strcmp(atts[0], "name")) {
@@ -132,8 +132,9 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
 
 static void expat_api_dir_end(void *ud, const XML_Char *name)
 {
-  if (!strcmp(name, "directory")) {
-    in_api_dir = 0;
+  struct filbuf *fb = (struct filbuf *)ud;
+  if (!strcmp(name, "directory") || !strcmp(name, "binarylist")) {
+    fb->in_dir = 0;
   }
 }
 
@@ -184,6 +185,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     fb.buf = buf;
     fb.path = path;
     fb.cdir = newdir;
+    fb.in_dir = 0;
     XML_SetUserData(xp, (void *)&fb);
     if (!xp)
       return 1;
