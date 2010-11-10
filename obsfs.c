@@ -23,9 +23,12 @@ static const char *hello_path = "/hello";
 char *file_cache_dir = NULL;
 int file_cache_count = 1;
 
+char *url_prefix = NULL;
+
 struct options {
   char *api_username;
   char *api_password;
+  char *api_hostname;
 } options;
 
 #define OBSFS_OPT_KEY(t, p, v) { t, offsetof(struct options, p), v }
@@ -34,6 +37,7 @@ static struct fuse_opt obsfs_opts[] =
 {
   OBSFS_OPT_KEY("user=%s", api_username, 0),
   OBSFS_OPT_KEY("pass=%s", api_password, 0),
+  OBSFS_OPT_KEY("host=%s", api_hostname, 0),
   FUSE_OPT_END
 };
 
@@ -150,7 +154,6 @@ static CURL *curl_open_file(const char *url)
 
 static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
 {
-  const char *prefix = "https://api.opensuse.org";
   char *urlbuf;
   XML_Parser xp;
   CURL *curl;
@@ -185,12 +188,12 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     if (!xp)
       return 1;
     XML_SetElementHandler(xp, expat_api_dir_start, expat_api_dir_end);
-    urlbuf = malloc(strlen(prefix) + strlen(path) + 1);
-    sprintf(urlbuf, "%s%s", prefix, path);
+    urlbuf = malloc(strlen(url_prefix) + strlen(path) + 1);
+    sprintf(urlbuf, "%s%s", url_prefix, path);
     curl = curl_open_file(urlbuf);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_adapter);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, xp);
-    fprintf(stderr, "username %s pw %s\n", options.api_username, options.api_password);
+    //fprintf(stderr, "username %s pw %s\n", options.api_username, options.api_password);
     if ((ret = curl_easy_perform(curl))) {
       fprintf(stderr,"curl error %d\n", ret);
     }
@@ -223,7 +226,6 @@ static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int obsfs_open(const char *path, struct fuse_file_info *fi)
 {
   char *urlbuf;
-  const char *prefix = "https://api.opensuse.org";
   CURL *curl;
   FILE *fp;
   char filename[11];
@@ -240,8 +242,8 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   fp = fopen(filename, "w+");
   unlink(filename);
   
-  urlbuf = malloc(strlen(prefix) + strlen(path) + 1);
-  sprintf(urlbuf, "%s%s", prefix, path);
+  urlbuf = malloc(strlen(url_prefix) + strlen(path) + 1);
+  sprintf(urlbuf, "%s%s", url_prefix, path);
   curl = curl_open_file(urlbuf);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
@@ -281,11 +283,24 @@ static void *obsfs_init(struct fuse_conn_info *conn)
     perror("chdir");
     abort();
   }
+  const char *host;
+  if (options.api_hostname)
+    host = options.api_hostname;
+  else
+    host = "api.opensuse.org";
+  url_prefix = malloc(strlen(host) + strlen("https://") + 1);
+  sprintf(url_prefix, "https://%s", host);
   return NULL;
+}
+
+static void obsfs_destroy(void *foo)
+{
+  free(url_prefix);
 }
 
 static struct fuse_operations obsfs_oper = {
   .init = obsfs_init,
+  .destroy = obsfs_destroy,
   .getattr = obsfs_getattr,
   .readdir = obsfs_readdir,
   .open = obsfs_open,
