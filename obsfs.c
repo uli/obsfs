@@ -32,8 +32,8 @@ struct options {
 
 static struct fuse_opt obsfs_opts[] =
 {
-  OBSFS_OPT_KEY("apiuser=%s", api_username, 0),
-  OBSFS_OPT_KEY("apipass=%s", api_password, 0),
+  OBSFS_OPT_KEY("user=%s", api_username, 0),
+  OBSFS_OPT_KEY("pass=%s", api_password, 0),
   FUSE_OPT_END
 };
 
