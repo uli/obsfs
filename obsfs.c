@@ -12,12 +12,16 @@
 #include <expat.h>
 #include <search.h>
 #include <libgen.h>
+#include <unistd.h>
 
 #include "obsfs.h"
 #include "hash.h"
 
 static const char *hello_str = "Hello World!\n";
 static const char *hello_path = "/hello";
+
+char *file_cache_dir = NULL;
+int file_cache_count = 1;
 
 struct options {
   char *api_username;
@@ -219,12 +223,35 @@ static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 static int obsfs_open(const char *path, struct fuse_file_info *fi)
 {
-  if (strcmp(path, hello_path) != 0)
-    return -ENOENT;
+  char *urlbuf;
+  const char *prefix = "https://api.opensuse.org";
+  CURL *curl;
+  FILE *fp;
+  char filename[11];
+  CURLcode ret;
+  
+  if (strcmp(path, hello_path) == 0) {
+    if ((fi->flags & 3) != O_RDONLY)
+      return -EACCES;
+    fi->fh = 0;
+    return 0;
+  }
 
-  if ((fi->flags & 3) != O_RDONLY)
-    return -EACCES;
-
+  sprintf(filename, "%d", file_cache_count++);
+  fp = fopen(filename, "w+");
+  
+  urlbuf = malloc(strlen(prefix) + strlen(path) + 1);
+  sprintf(urlbuf, "%s%s", prefix, path);
+  curl = curl_open_file(urlbuf);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+  if ((ret = curl_easy_perform(curl))) {
+    fprintf(stderr,"curl error %d\n", ret);
+  }
+  curl_easy_cleanup(curl);
+  free(urlbuf);
+  fi->fh = dup(fileno(fp));
+  fclose(fp);
   return 0;
 }
 
@@ -233,21 +260,31 @@ static int obsfs_read(const char *path, char *buf, size_t size, off_t offset,
 {
   size_t len;
   (void)fi;
-  if (strcmp(path, hello_path) != 0)
-    return -ENOENT;
+  if (strcmp(path, hello_path) == 0) {
+    len = strlen(hello_str);
+    if (offset < len) {
+      if (offset + size > len)
+        size = len - offset;
+      memcpy(buf, hello_str + offset, size);
+    } else
+      size = 0;
 
-  len = strlen(hello_str);
-  if (offset < len) {
-    if (offset + size > len)
-      size = len - offset;
-    memcpy(buf, hello_str + offset, size);
-  } else
-    size = 0;
+    return size;
+  }
+  
+  return pread(fi->fh, buf, size, offset);
+}
 
-  return size;
+static void obsfs_init(void *ud, struct fuse_conn_info *conn)
+{
+  if (chdir(file_cache_dir)) {
+    perror("chdir");
+    abort();
+  }
 }
 
 static struct fuse_operations obsfs_oper = {
+  .init = obsfs_init,
   .getattr = obsfs_getattr,
   .readdir = obsfs_readdir,
   .open = obsfs_open,
@@ -269,7 +306,18 @@ int main(int argc, char *argv[])
   hash_init();
   dir_cache_init();
   
+  file_cache_dir = strdup("/tmp/obsfs_cacheXXXXXX");
+  if (!mkdtemp(file_cache_dir)) {
+    perror("mkdtemp");
+    return -1;
+  }
+    
   ret = fuse_main(args.argc, args.argv, &obsfs_oper, NULL);
+  
+  if (rmdir(file_cache_dir)) {
+    perror("rmdir");
+  }
+  free(file_cache_dir);
   
   fuse_opt_free_args(&args);
   hash_free();
