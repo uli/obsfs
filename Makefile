@@ -9,3 +9,5 @@ obsfs: $(OBJS)
 
 clean:
 	rm -f $(OBJS) obsfs
+
+obsfs.o hash.o: hash.h obsfs.h

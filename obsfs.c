@@ -50,7 +50,7 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
   } else {
     struct stat *ret;
     fprintf(stderr, "getattr: looking for %s\n", path);
-    ret = hash_find(path);
+    ret = hash_find_attr(path);
     if (ret) {
       fprintf(stderr, "found it!\n");
       *stbuf = *ret;
@@ -60,7 +60,7 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
       fprintf(stderr, "not found, trying to get directory\n");
       obsfs_readdir(dirname(dir), NULL, NULL, 0, NULL);
       free(dir);
-      ret = hash_find(path);
+      ret = hash_find_attr(path);
       if (ret) {
         fprintf(stderr, "found it after all\n");
         *stbuf = *ret;
@@ -80,6 +80,7 @@ struct filbuf {
   void *buf;
   fuse_fill_dir_t filler;
   const char *path;
+  dir_t *cdir;
 };
 
 static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char **atts)
@@ -111,10 +112,11 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         char *full_path;
         if (fb->filler)
           fb->filler(fb->buf, filename, &st, 0);
+        dir_add(fb->cdir, filename, st.st_mode == S_IFDIR);
         full_path = malloc(strlen(fb->path) + strlen(filename) + 2);
         sprintf(full_path, "%s/%s", fb->path, filename);
         fprintf(stderr, "hashing %s\n", full_path);
-        hash_add(full_path, &st);
+        hash_add_attr(full_path, &st);
         free(full_path);
       }
       atts += 2;
@@ -152,26 +154,48 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
   CURL *curl;
   CURLcode ret;
   struct filbuf fb;
-  xp = XML_ParserCreate(NULL);
-  fb.filler = filler;
-  fb.buf = buf;
-  fb.path = path;
-  XML_SetUserData(xp, (void *)&fb);
-  if (!xp)
-    return 1;
-  XML_SetElementHandler(xp, expat_api_dir_start, expat_api_dir_end);
-  urlbuf = malloc(strlen(prefix) + strlen(path) + 1);
-  sprintf(urlbuf, "%s%s", prefix, path);
-  curl = curl_open_file(urlbuf);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_adapter);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, xp);
-  fprintf(stderr, "username %s pw %s\n", options.api_username, options.api_password);
-  if ((ret = curl_easy_perform(curl))) {
-    fprintf(stderr,"curl error %d\n", ret);
+  dirent_t *cdir;
+  int cdir_size;
+  cdir_size = dir_find(&cdir, path);
+  if (cdir_size != -1) {
+    int i;
+    struct stat st;
+    memset(&st, 0, sizeof(struct stat));
+    if (!filler)
+      return 0;
+    for (i = 0; i < cdir_size; i++) {
+      if (cdir[i].is_dir)
+        st.st_mode = S_IFDIR;
+      else
+        st.st_mode = S_IFREG;
+      filler(buf, cdir[i].name, &st, 0);
+    }
   }
-  curl_easy_cleanup(curl);
-  XML_ParserFree(xp);
-  free(urlbuf);
+  else {
+    dir_t *newdir;
+    newdir = dir_new(path);
+    xp = XML_ParserCreate(NULL);
+    fb.filler = filler;
+    fb.buf = buf;
+    fb.path = path;
+    fb.cdir = newdir;
+    XML_SetUserData(xp, (void *)&fb);
+    if (!xp)
+      return 1;
+    XML_SetElementHandler(xp, expat_api_dir_start, expat_api_dir_end);
+    urlbuf = malloc(strlen(prefix) + strlen(path) + 1);
+    sprintf(urlbuf, "%s%s", prefix, path);
+    curl = curl_open_file(urlbuf);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_adapter);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, xp);
+    fprintf(stderr, "username %s pw %s\n", options.api_username, options.api_password);
+    if ((ret = curl_easy_perform(curl))) {
+      fprintf(stderr,"curl error %d\n", ret);
+    }
+    curl_easy_cleanup(curl);
+    XML_ParserFree(xp);
+    free(urlbuf);
+  }
   return 0;
 }
 
@@ -244,11 +268,13 @@ int main(int argc, char *argv[])
     return -1;
 
   hash_init();
+  dir_cache_init();
   
   ret = fuse_main(args.argc, args.argv, &obsfs_oper, NULL);
   
   fuse_opt_free_args(&args);
   hash_free();
+  dir_cache_free();
   
   return ret;
 }
