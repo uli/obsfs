@@ -97,7 +97,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
     return;
   }
   if (in_api_dir && (!strcmp(name, "entry") || !strcmp(name, "binary"))) {
-    char *filename = NULL;
+    const char *filename = NULL;
     while (*atts) {
       if (!strcmp(atts[0], "name")) {
         filename = atts[1];
@@ -113,7 +113,6 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       atts += 2;
     }
     if (filename) {
-      struct stat *re;
       char *full_path;
       if (fb->filler)
         fb->filler(fb->buf, filename, &st, 0);
@@ -276,12 +275,13 @@ static int obsfs_read(const char *path, char *buf, size_t size, off_t offset,
   return pread(fi->fh, buf, size, offset);
 }
 
-static void obsfs_init(void *ud, struct fuse_conn_info *conn)
+static void *obsfs_init(struct fuse_conn_info *conn)
 {
   if (chdir(file_cache_dir)) {
     perror("chdir");
     abort();
   }
+  return NULL;
 }
 
 static struct fuse_operations obsfs_oper = {
