@@ -239,6 +239,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
 
   sprintf(filename, "%d", file_cache_count++);
   fp = fopen(filename, "w+");
+  unlink(filename);
   
   urlbuf = malloc(strlen(prefix) + strlen(path) + 1);
   sprintf(urlbuf, "%s%s", prefix, path);
