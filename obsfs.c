@@ -88,14 +88,13 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   struct stat st;
   struct filbuf *fb = (struct filbuf *)ud;
   memset(&st, 0, sizeof(struct stat));
-  st.st_mode = S_IFDIR;
   if (!strcmp(name, "directory") || !strcmp(name, "binarylist")) {
     in_api_dir = 1;
     return;
   }
   if (in_api_dir && (!strcmp(name, "entry") || !strcmp(name, "binary"))) {
+    char *filename = NULL;
     while (*atts) {
-      char *filename = NULL;
       if (!strcmp(atts[0], "name")) {
         filename = atts[1];
         st.st_mode = S_IFDIR;
@@ -107,19 +106,19 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       else if (!strcmp(atts[0], "size")) {
         st.st_size = atoi(atts[1]);
       }
-      if (filename) {
-        struct stat *re;
-        char *full_path;
-        if (fb->filler)
-          fb->filler(fb->buf, filename, &st, 0);
-        dir_add(fb->cdir, filename, st.st_mode == S_IFDIR);
-        full_path = malloc(strlen(fb->path) + strlen(filename) + 2);
-        sprintf(full_path, "%s/%s", fb->path, filename);
-        fprintf(stderr, "hashing %s\n", full_path);
-        hash_add_attr(full_path, &st);
-        free(full_path);
-      }
       atts += 2;
+    }
+    if (filename) {
+      struct stat *re;
+      char *full_path;
+      if (fb->filler)
+        fb->filler(fb->buf, filename, &st, 0);
+      dir_add(fb->cdir, filename, st.st_mode == S_IFDIR);
+      full_path = malloc(strlen(fb->path) + strlen(filename) + 2);
+      sprintf(full_path, "%s/%s", fb->path, filename);
+      fprintf(stderr, "hashing %s with size %ld\n", full_path, st.st_size);
+      hash_add_attr(full_path, &st);
+      free(full_path);
     }
   }
 }
