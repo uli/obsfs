@@ -10,7 +10,6 @@
 
 #include <curl/curl.h>
 #include <expat.h>
-#include <search.h>
 #include <libgen.h>
 #include <unistd.h>
 
