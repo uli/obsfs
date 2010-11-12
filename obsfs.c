@@ -153,6 +153,18 @@ static CURL *curl_open_file(const char *url)
   return curl;
 }
 
+/* find the depth of a path (used to determine whether it's necessary
+   to add additional "fixed" nodes such as _log, _status etc. */
+static int path_depth(const char *path)
+{
+  int count = 0;
+  for (path++ /* skip first slash */; *path; path++) {
+    if (*path == '/')
+      count++;
+  }
+  return count;
+}
+
 static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
 {
   char *urlbuf;
@@ -202,6 +214,42 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     curl_easy_cleanup(curl);
     XML_ParserFree(xp);
     free(urlbuf);
+    
+    /* check if we need to add additional nodes */
+    /* Most of the available API is not exposed through directories. We have to know
+       about it and add them ourselves at the appropriate places. */
+    fprintf(stderr, "path depth of %s is %d\n", path, path_depth(path));
+    
+    /* log, history, status, and reason for packages */
+    if (!strncmp("/build", path, 6) && path_depth(path) == 4) {
+      int i;
+      struct stat st;
+      char *full_path;
+
+      memset(&st, 0, sizeof(struct stat));
+      st.st_mode = S_IFREG;
+      /* st.st_size = 4096; not sure if this is a good idea */
+      
+      /* package status APIs */
+      const char const *status_api[] = {
+        "_history", "_reason", "_status", "_log", NULL
+      };
+      for (i = 0; status_api[i]; i++) {
+        /* add node to the directory buffer (if any) */
+        if (filler)
+          filler(buf, status_api[i], &st, 0);
+
+        /* compose a full path and add node to the attribute cache */
+        full_path = malloc(strlen(path) + 1 /* slash */ + strlen(status_api[i]) + 1 /* null */);
+        sprintf(full_path, "%s/%s", path, status_api[i]);
+        hash_add_attr(full_path, &st);
+        
+        /* add node to the directory cache entry */
+        dir_add(newdir, status_api[i], 0);
+        
+        free(full_path);
+      }
+    }
   }
   return 0;
 }
@@ -232,6 +280,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   FILE *fp;
   char filename[11];
   CURLcode ret;
+  struct stat st;
   
   if (strcmp(path, hello_path) == 0) {
     if ((fi->flags & 3) != O_RDONLY)
@@ -256,6 +305,13 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   free(urlbuf);
   fi->fh = dup(fileno(fp));
   fclose(fp);
+
+  /* now that we have the actual size, update the stat cache */
+  if (fstat(fi->fh, &st)) {
+    perror("fstat");
+  }
+  hash_add_attr(path, &st);
+
   return 0;
 }
 
