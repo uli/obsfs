@@ -43,6 +43,30 @@ static struct fuse_opt obsfs_opts[] =
   FUSE_OPT_END
 };
 
+static void stat_make_file(struct stat *st)
+{
+  st->st_mode = S_IFREG | 0644;
+  st->st_nlink = 1;
+}
+
+static void stat_default_file(struct stat *st)
+{
+  memset(st, 0, sizeof(struct stat));
+  stat_make_file(st);
+}
+
+static void stat_make_dir(struct stat *st)
+{
+  st->st_mode = S_IFDIR | 0755;
+  st->st_nlink = 2;
+}
+
+static void stat_default_dir(struct stat *st)
+{
+  memset(st, 0, sizeof(struct stat));
+  stat_make_dir(st);
+}
+
 static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                          off_t offset, struct fuse_file_info *fi);
                          
@@ -55,8 +79,7 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
     /* root and the stuff inside it cannot be deduced because the server
        returns a human-readable info page for "/", so they are hardcoded
        here. */
-    stbuf->st_mode = S_IFDIR | 0755;
-    stbuf->st_nlink = 2;
+    stat_make_dir(stbuf);
   } else if (strcmp(path, hello_path) == 0) {
     stbuf->st_mode = S_IFREG | 0444;
     stbuf->st_nlink = 1;
@@ -96,8 +119,7 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
       else {
         /* file not found */
         /* FIXME: should we still have this fallback? */
-        stbuf->st_mode = S_IFDIR | 0755;
-        stbuf->st_nlink = 2;
+        stat_make_dir(stbuf);
       }
     }
   }
@@ -163,7 +185,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   struct stat st;
   struct filbuf *fb = (struct filbuf *)ud;
 
-  memset(&st, 0, sizeof(struct stat));
+  stat_default_file(&st);
 
   /* start of directory */
   if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result")) {
@@ -184,12 +206,12 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       if (!strcmp(atts[0], "name")) {
         /* entry in a "directory" directory; we assume it is itself a directory */
         filename = atts[1];
-        st.st_mode = S_IFDIR;
+        stat_make_dir(&st);
       }
       else if (!strcmp(atts[0], "filename")) {
         /* entry in a "binarylist" directory, this is always a regular file */
         filename = atts[1];
-        st.st_mode = S_IFREG;
+        stat_make_file(&st);
       }
       else if (!strcmp(atts[0], "size")) {
         /* file size */
@@ -202,7 +224,8 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
     }
   }
   
-  memset(&st, 0, sizeof(struct stat));
+  stat_default_file(&st);
+  
   if (fb->in_dir && !strcmp(name, "status")) {
     const char *packagename = NULL;
     for (; *atts; atts += 2) {
@@ -337,12 +360,12 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       return 0;
 
     /* fill the FUSE dir buffer with our cached entries */
-    memset(&st, 0, sizeof(struct stat));
+    stat_default_file(&st);
     for (i = 0; i < cached_dirents_size; i++) {
       if (cached_dirents[i].is_dir)
-        st.st_mode = S_IFDIR;
+        stat_make_dir(&st);
       else
-        st.st_mode = S_IFREG;
+        stat_make_file(&st);
       filler(buf, cached_dirents[i].name, &st, 0);
     }
   }
@@ -375,8 +398,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       /* log, history, status, and reason for packages */
       if (path_depth(path) == 3) {
         struct stat st;
-        memset(&st, 0, sizeof(st));
-        st.st_mode = S_IFDIR;
+        stat_default_dir(&st);
         add_dir_node(buf, filler, newdir, path, "_failed", &st, NULL);
       }
       char *fpath = strdup(path);
@@ -384,8 +406,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
         int i;
         struct stat st;
 
-        memset(&st, 0, sizeof(struct stat));
-        st.st_mode = S_IFREG;
+        stat_default_file(&st);
         /* st.st_size = 4096; not sure if this is a good idea */
         
         /* package status APIs */
@@ -409,7 +430,7 @@ static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   (void)fi;
   struct stat st;
 
-  memset(&st, 0, sizeof(st));
+  stat_default_file(&st);
   fprintf(stderr, "readdir path %s\n", path);
   
   /* The API server does not provide us with a root directory; retrieving
