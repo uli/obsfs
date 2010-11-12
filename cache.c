@@ -1,5 +1,5 @@
 #include "obsfs.h"
-#include "hash.h"
+#include "cache.h"
 
 #include <stdint.h>
 #include <string.h>

@@ -15,7 +15,7 @@
 #include <unistd.h>
 
 #include "obsfs.h"
-#include "hash.h"
+#include "cache.h"
 
 /* leftovers from the Hello, World example */
 static const char *hello_str = "Hello World!\n";

@@ -1,4 +1,4 @@
-OBJS = obsfs.o hash.o
+OBJS = obsfs.o cache.o
 LIBS = -lfuse -lcurl -lexpat
 CFLAGS = -g -Wall -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE
 
@@ -10,4 +10,4 @@ obsfs: $(OBJS)
 clean:
 	rm -f $(OBJS) obsfs
 
-obsfs.o hash.o: hash.h obsfs.h
+obsfs.o cache.o: cache.h obsfs.h
