@@ -25,13 +25,13 @@ static uint32_t hash_string(const char *str)
 }
 
 /* clear attribute cache */
-void hash_init(void)
+void attr_cache_init(void)
 {
   memset(attr_hash, 0, sizeof(attr_hash));
 }
 
 /* add an entry to the attribute cache */
-void hash_add_attr(const char *path, struct stat *st)
+void attr_cache_add(const char *path, struct stat *st)
 {
   attr_t *h = &attr_hash[hash_string(path) % ATTR_CACHE_SIZE];
 
@@ -44,7 +44,7 @@ void hash_add_attr(const char *path, struct stat *st)
 }
 
 /* retrieve an entry from the attribute cache */
-struct stat *hash_find_attr(const char *path)
+struct stat *attr_cache_find(const char *path)
 {
   attr_t *h = &attr_hash[hash_string(path) % ATTR_CACHE_SIZE];
   if (h->path) {
@@ -59,7 +59,7 @@ struct stat *hash_find_attr(const char *path)
 }
 
 /* free() memory used by attribute cache entries */
-void hash_free(void)
+void attr_cache_free(void)
 {
   int i;
   for (i = 0; i < ATTR_CACHE_SIZE; i++) {
@@ -91,7 +91,7 @@ static void free_dir(dir_t *d)
 }
 
 /* create a new directory cache entry */
-dir_t *dir_new(const char *path)
+dir_t *dir_cache_new(const char *path)
 {
   dir_t *d = &dir_hash[hash_string(path) % DIR_CACHE_SIZE];
 
@@ -105,7 +105,7 @@ dir_t *dir_new(const char *path)
 }
 
 /* add a node to a directory cache entry */
-void dir_add(dir_t *dir, const char *name, int is_dir)
+void dir_cache_add(dir_t *dir, const char *name, int is_dir)
 {
   dirent_t *de;
   /* allocate memory for one more node */
@@ -117,7 +117,7 @@ void dir_add(dir_t *dir, const char *name, int is_dir)
 }
 
 /* retrieve a directory cache entry */
-int dir_find(dirent_t **dir, const char *path)
+int dir_cache_find(dirent_t **dir, const char *path)
 {
   dir_t *d = &dir_hash[hash_string(path) % DIR_CACHE_SIZE];
   if (!d->path || strcmp(d->path, path))

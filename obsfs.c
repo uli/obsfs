@@ -67,7 +67,7 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
     struct stat *ret;
     fprintf(stderr, "getattr: looking for %s\n", path);
     /* let's see if we have that cached already */
-    ret = hash_find_attr(path);
+    ret = attr_cache_find(path);
     if (ret) {
       fprintf(stderr, "found it!\n");
       *stbuf = *ret;
@@ -89,7 +89,7 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
       obsfs_readdir(dirname(dir), NULL, NULL, 0, NULL);
       free(dir);
       /* now the attributes are in the attr cache (if it exists at all) */
-      ret = hash_find_attr(path);
+      ret = attr_cache_find(path);
       if (ret) {
         fprintf(stderr, "found it after all\n");
         *stbuf = *ret;
@@ -159,13 +159,13 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         fb->filler(fb->buf, filename, &st, 0);
       }
       /* add this entry to the directory cache */
-      dir_add(fb->cdir, filename, st.st_mode == S_IFDIR);
+      dir_cache_add(fb->cdir, filename, st.st_mode == S_IFDIR);
 
       /* add this entry to the attribute cache */
       full_path = malloc(strlen(fb->path) + strlen(filename) + 2);
       sprintf(full_path, "%s/%s", fb->path, filename);
       fprintf(stderr, "hashing %s with size %ld\n", full_path, st.st_size);
-      hash_add_attr(full_path, &st);
+      attr_cache_add(full_path, &st);
       free(full_path);
     }
   }
@@ -225,7 +225,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
   int cached_dirents_size;
 
   /* see if we have this directory cached already */
-  cached_dirents_size = dir_find(&cached_dirents, path);
+  cached_dirents_size = dir_cache_find(&cached_dirents, path);
   if (cached_dirents_size != -1) {
     /* cache hit */
     int i;
@@ -247,7 +247,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
   }
   else {
     /* not in cache, we have to retrieve it from the API server */
-    dir_t *newdir = dir_new(path); /* get directory cache handle */
+    dir_t *newdir = dir_cache_new(path); /* get directory cache handle */
 
     xp = XML_ParserCreate(NULL);   /* create an expat parser */
     if (!xp)
@@ -312,10 +312,10 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
         /* compose a full path and add node to the attribute cache */
         full_path = malloc(strlen(path) + 1 /* slash */ + strlen(status_api[i]) + 1 /* null */);
         sprintf(full_path, "%s/%s", path, status_api[i]);
-        hash_add_attr(full_path, &st);
+        attr_cache_add(full_path, &st);
         
         /* add node to the directory cache entry */
-        dir_add(newdir, status_api[i], 0);
+        dir_cache_add(newdir, status_api[i], 0);
         
         free(full_path);
       }
@@ -400,7 +400,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   if (fstat(fi->fh, &st)) {
     perror("fstat");
   }
-  hash_add_attr(path, &st);
+  attr_cache_add(path, &st);
 
   return 0;
 }
@@ -475,7 +475,7 @@ int main(int argc, char *argv[])
     return -1;
 
   /* initialize caches */
-  hash_init();
+  attr_cache_init();
   dir_cache_init();
   
   /* create a directory for the file cache */
@@ -496,7 +496,7 @@ int main(int argc, char *argv[])
   free(file_cache_dir);
   
   fuse_opt_free_args(&args);
-  hash_free();
+  attr_cache_free();
   dir_cache_free();
   
   return ret;
