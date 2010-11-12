@@ -114,6 +114,25 @@ struct filbuf {
   int in_dir;			/* flag set when inside a <directory> or <binarylist> */
 };
 
+/* add a node to a FUSE directory buffer, a directory cache entry, and the attribute cache */
+static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *path, const char *node_name, struct stat *st)
+{
+  char *full_path;
+  /* add node to the directory buffer (if any) */
+  if (filler)
+    filler(buf, node_name, st, 0);
+
+  /* compose a full path and add node to the attribute cache */
+  full_path = malloc(strlen(path) + 1 /* slash */ + strlen(node_name) + 1 /* null */);
+  sprintf(full_path, "%s/%s", path, node_name);
+  attr_cache_add(full_path, st);
+  
+  /* add node to the directory cache entry */
+  dir_cache_add(newdir, node_name, 0);
+  
+  free(full_path);
+}
+
 /* expat tag start callback for reading API directories */
 static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char **atts)
 {
@@ -151,21 +170,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       atts += 2; /* expat hands us a string array with name/value pairs */
     }
     if (filename) {
-      char *full_path;	/* for the attribute cache, we need the full path */
-      /* fb->filler might be NULL if we're called from obsfs_getattr() for the
-         task of filling the attribute cache */
-      if (fb->filler) {
-        fb->filler(fb->buf, filename, &st, 0);
-      }
-      /* add this entry to the directory cache */
-      dir_cache_add(fb->cdir, filename, st.st_mode == S_IFDIR);
-
-      /* add this entry to the attribute cache */
-      full_path = malloc(strlen(fb->path) + strlen(filename) + 2);
-      sprintf(full_path, "%s/%s", fb->path, filename);
-      fprintf(stderr, "hashing %s with size %ld\n", full_path, st.st_size);
-      attr_cache_add(full_path, &st);
-      free(full_path);
+      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->path, filename, &st);
     }
   }
 }
@@ -293,7 +298,6 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     if (!strncmp("/build", path, 6) && path_depth(path) == 4) {
       int i;
       struct stat st;
-      char *full_path;
 
       memset(&st, 0, sizeof(struct stat));
       st.st_mode = S_IFREG;
@@ -304,19 +308,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
         "_history", "_reason", "_status", "_log", NULL
       };
       for (i = 0; status_api[i]; i++) {
-        /* add node to the directory buffer (if any) */
-        if (filler)
-          filler(buf, status_api[i], &st, 0);
-
-        /* compose a full path and add node to the attribute cache */
-        full_path = malloc(strlen(path) + 1 /* slash */ + strlen(status_api[i]) + 1 /* null */);
-        sprintf(full_path, "%s/%s", path, status_api[i]);
-        attr_cache_add(full_path, &st);
-        
-        /* add node to the directory cache entry */
-        dir_cache_add(newdir, status_api[i], 0);
-        
-        free(full_path);
+        add_dir_node(buf, filler, newdir, path, status_api[i], &st);
       }
     }
   }
