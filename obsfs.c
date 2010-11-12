@@ -216,15 +216,54 @@ static int path_depth(const char *path)
   return count;
 }
 
+static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *api_path)
+{
+  char *urlbuf;	/* used to compose the full API URL */
+  CURL *curl;
+  CURLcode ret;
+  XML_Parser xp;
+  struct filbuf fb;	/* data the expat callbacks need */
+  xp = XML_ParserCreate(NULL);   /* create an expat parser */
+  if (!xp)
+    abort();
+
+  /* copy some data that the parser callbacks will need */
+  fb.filler = filler;
+  fb.buf = buf;
+  fb.path = api_path;
+  fb.cdir = newdir;
+  fb.in_dir = 0;
+  XML_SetUserData(xp, (void *)&fb);	/* pass the data to the parser */
+
+  /* set handlers for start and end tags */
+  XML_SetElementHandler(xp, expat_api_dir_start, expat_api_dir_end);
+  
+  /* construct the full API URL for this directory */
+  urlbuf = malloc(strlen(url_prefix) + strlen(api_path) + 1);
+  sprintf(urlbuf, "%s%s", url_prefix, api_path);
+  
+  /* open the URL and set up CURL options */
+  curl = curl_open_file(urlbuf, write_adapter, xp);
+  //fprintf(stderr, "username %s pw %s\n", options.api_username, options.api_password);
+  
+  /* perform the actual retrieval; this will instruct curl to get the data from
+     the API server and call the write_adapter() for each hunk of data, which will
+     in turn call XML_Parse() which will funnel the invidiual components through
+     the start and end tag handlers expat_api_dir_start() and expat_api_dir_end() */
+  if ((ret = curl_easy_perform(curl))) {
+    fprintf(stderr,"curl error %d\n", ret);
+  }
+  
+  /* clean up stuff */
+  curl_easy_cleanup(curl);
+  XML_ParserFree(xp);
+  free(urlbuf);
+}
+
 /* read an API directory and fill in the FUSE directory buffer, the directory
    cache, and the attribute cache */
 static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
 {
-  char *urlbuf;	/* used to compose the full API URL */
-  XML_Parser xp;
-  CURL *curl;
-  CURLcode ret;
-  struct filbuf fb;	/* data the expat callbacks need */
   dirent_t *cached_dirents;
   int cached_dirents_size;
 
@@ -253,41 +292,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     /* not in cache, we have to retrieve it from the API server */
     dir_t *newdir = dir_cache_new(path); /* get directory cache handle */
 
-    xp = XML_ParserCreate(NULL);   /* create an expat parser */
-    if (!xp)
-      return 1;
-
-    /* copy some data that the parser callbacks will need */
-    fb.filler = filler;
-    fb.buf = buf;
-    fb.path = path;
-    fb.cdir = newdir;
-    fb.in_dir = 0;
-    XML_SetUserData(xp, (void *)&fb);	/* pass the data to the parser */
-
-    /* set handlers for start and end tags */
-    XML_SetElementHandler(xp, expat_api_dir_start, expat_api_dir_end);
-    
-    /* construct the full API URL for this directory */
-    urlbuf = malloc(strlen(url_prefix) + strlen(path) + 1);
-    sprintf(urlbuf, "%s%s", url_prefix, path);
-    
-    /* open the URL and set up CURL options */
-    curl = curl_open_file(urlbuf, write_adapter, xp);
-    //fprintf(stderr, "username %s pw %s\n", options.api_username, options.api_password);
-    
-    /* perform the actual retrieval; this will instruct curl to get the data from
-       the API server and call the write_adapter() for each hunk of data, which will
-       in turn call XML_Parse() which will funnel the invidiual components through
-       the start and end tag handlers expat_api_dir_start() and expat_api_dir_end() */
-    if ((ret = curl_easy_perform(curl))) {
-      fprintf(stderr,"curl error %d\n", ret);
-    }
-    
-    /* clean up stuff */
-    curl_easy_cleanup(curl);
-    XML_ParserFree(xp);
-    free(urlbuf);
+    parse_dir(buf, filler, newdir, path);
     
     /* check if we need to add additional nodes */
     /* Most of the available API is not exposed through directories. We have to know
