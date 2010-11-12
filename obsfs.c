@@ -174,7 +174,7 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
   attr_cache_add(full_path, st, link);
   
   /* add node to the directory cache entry */
-  dir_cache_add(newdir, node_name, 0);
+  dir_cache_add(newdir, node_name, S_ISDIR(st->st_mode) ? 1 : 0);
   
   free(full_path);
 }
