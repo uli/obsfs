@@ -101,8 +101,8 @@ void dir_add(dir_t *dir, const char *name, int is_dir)
 int dir_find(dirent_t **dir, const char *path)
 {
   dir_t *d = &dir_hash[hash_string(path) % DIR_CACHE_SIZE];
-  if (!d->path)
-    return -1;
+  if (!d->path || strcmp(d->path, path))
+    return -1;	/* cache miss */
   *dir = d->entries;
   return d->num_entries;
 }
