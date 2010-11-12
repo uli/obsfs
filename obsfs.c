@@ -58,7 +58,7 @@ static void stat_default_file(struct stat *st)
 static void stat_make_dir(struct stat *st)
 {
   st->st_mode = S_IFDIR | 0755;
-  st->st_nlink = 42;
+  st->st_nlink = 2;
 }
 
 static void stat_default_dir(struct stat *st)
@@ -175,6 +175,12 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
   
   /* add node to the directory cache entry */
   dir_cache_add(newdir, node_name, S_ISDIR(st->st_mode) ? 1 : 0);
+  
+  if (S_ISDIR(st->st_mode)) {
+    attr_t *parent = attr_cache_find(path);
+    if (parent)
+      parent->st.st_nlink++;
+  }
   
   free(full_path);
 }
