@@ -1,5 +1,11 @@
 #include <sys/stat.h>
 
+typedef struct {
+  char *path;
+  struct stat st;
+  char *link;
+} attr_t;
+
 /* one node of a directory cache entry */
 typedef struct {
   char *name;
@@ -15,8 +21,8 @@ typedef struct {
 
 /* attribute cache methods */
 void attr_cache_init(void);
-void attr_cache_add(const char *path, struct stat *st);
-struct stat *attr_cache_find(const char *path);
+void attr_cache_add(const char *path, struct stat *st, const char *link);
+attr_t *attr_cache_find(const char *path);
 void attr_cache_free(void);
 
 /* directory cache methods */

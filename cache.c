@@ -5,11 +5,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-typedef struct {
-  char *path;
-  struct stat st;
-} attr_t;
-
 attr_t attr_hash[ATTR_CACHE_SIZE];
 dir_t dir_hash[DIR_CACHE_SIZE];
 
@@ -31,7 +26,7 @@ void attr_cache_init(void)
 }
 
 /* add an entry to the attribute cache */
-void attr_cache_add(const char *path, struct stat *st)
+void attr_cache_add(const char *path, struct stat *st, const char *link)
 {
   attr_t *h = &attr_hash[hash_string(path) % ATTR_CACHE_SIZE];
 
@@ -41,10 +36,12 @@ void attr_cache_add(const char *path, struct stat *st)
 
   h->path = strdup(path);
   h->st = *st;
+  if (link)
+    h->link = strdup(link);
 }
 
 /* retrieve an entry from the attribute cache */
-struct stat *attr_cache_find(const char *path)
+attr_t *attr_cache_find(const char *path)
 {
   attr_t *h = &attr_hash[hash_string(path) % ATTR_CACHE_SIZE];
   if (h->path) {
@@ -52,7 +49,7 @@ struct stat *attr_cache_find(const char *path)
     if (strcmp(path, h->path))
       return NULL;	/* cache miss */
     else
-      return &h->st;	/* cache hit */
+      return h;	/* cache hit */
   }
   else
     return NULL;	/* cache miss */
@@ -65,6 +62,8 @@ void attr_cache_free(void)
   for (i = 0; i < ATTR_CACHE_SIZE; i++) {
     if (attr_hash[i].path)
       free(attr_hash[i].path);
+    if (attr_hash[i].link)
+      free(attr_hash[i].link);
   }
   /* FIXME: shouldn't we clear the array here? */
 }

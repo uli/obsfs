@@ -63,13 +63,13 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
     stbuf->st_size = strlen(hello_str);
   } else {
     /* actual API files and directories */
-    struct stat *ret;
+    attr_t *ret;
     fprintf(stderr, "getattr: looking for %s\n", path);
     /* let's see if we have that cached already */
     ret = attr_cache_find(path);
     if (ret) {
       fprintf(stderr, "found it!\n");
-      *stbuf = *ret;
+      *stbuf = ret->st;
     } 
     else {
       /* Cache miss, we are going to retrieve the directory "path" is in.
@@ -91,7 +91,7 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
       ret = attr_cache_find(path);
       if (ret) {
         fprintf(stderr, "found it after all\n");
-        *stbuf = *ret;
+        *stbuf = ret->st;
       }
       else {
         /* file not found */
@@ -105,17 +105,41 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
   return 0;
 }
 
+static int obsfs_readlink(const char *path, char *buf, size_t buflen)
+{
+  attr_t *ret = attr_cache_find(path);
+  if (ret) {
+found:
+    strncpy(buf, ret->link, buflen - 1);
+    buf[buflen-1] = 0;
+    return 0;
+  }
+  char *dir = strdup(path);	/* dirname modifies its argument, need to copy */
+  fprintf(stderr, "link not found, trying to get directory\n");
+  /* call with buf and filler NULL for cache-only operation */
+  obsfs_readdir(dirname(dir), NULL, NULL, 0, NULL);
+  free(dir);
+  /* now the attributes are in the attr cache (if it exists at all) */
+  ret = attr_cache_find(path);
+  if (ret)
+   goto found;
+  return -1;
+}
+
 /* data we need in the expat callbacks to save the directory entries */
 struct filbuf {
   void *buf;			/* directory entry buffer, provided by FUSE */
   fuse_fill_dir_t filler;	/* buffer filler function */
-  const char *path;		/* directory to read */
+  const char *fs_path;		/* directory to read... */
+  const char *api_path;		/* ... and where to get it from */
   dir_t *cdir;			/* dir cache entry to fill in */
   int in_dir;			/* flag set when inside a <directory> or <binarylist> */
+  const char *filter_attr;
+  const char *filter_value;
 };
 
 /* add a node to a FUSE directory buffer, a directory cache entry, and the attribute cache */
-static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *path, const char *node_name, struct stat *st)
+static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *path, const char *node_name, struct stat *st, const char *link)
 {
   char *full_path;
   /* add node to the directory buffer (if any) */
@@ -125,7 +149,7 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
   /* compose a full path and add node to the attribute cache */
   full_path = malloc(strlen(path) + 1 /* slash */ + strlen(node_name) + 1 /* null */);
   sprintf(full_path, "%s/%s", path, node_name);
-  attr_cache_add(full_path, st);
+  attr_cache_add(full_path, st, link);
   
   /* add node to the directory cache entry */
   dir_cache_add(newdir, node_name, 0);
@@ -142,7 +166,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   memset(&st, 0, sizeof(struct stat));
 
   /* start of directory */
-  if (!strcmp(name, "directory") || !strcmp(name, "binarylist")) {
+  if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result")) {
     fb->in_dir = 1;
     return;
   }
@@ -153,6 +177,10 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
     
     /* process all attributes */
     while (*atts) {
+      if (fb->filter_attr && !strcmp(atts[0], fb->filter_attr) && strcmp(atts[1], fb->filter_value)) {
+        filename = NULL;
+        break;
+      }
       if (!strcmp(atts[0], "name")) {
         /* entry in a "directory" directory; we assume it is itself a directory */
         filename = atts[1];
@@ -170,7 +198,30 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       atts += 2; /* expat hands us a string array with name/value pairs */
     }
     if (filename) {
-      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->path, filename, &st);
+      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, NULL);
+    }
+  }
+  
+  memset(&st, 0, sizeof(struct stat));
+  if (fb->in_dir && !strcmp(name, "status")) {
+    const char *packagename = NULL;
+    for (; *atts; atts += 2) {
+      if (fb->filter_attr && !strcmp(atts[0], fb->filter_attr) && strcmp(atts[1], fb->filter_value)) {
+        packagename = NULL;
+        break;
+      }
+      if (!strcmp(atts[0], "package")) {
+        packagename = atts[1];
+        st.st_mode = S_IFLNK;
+      }
+      /* FIXME: parse endtime */
+    }
+    if (packagename) {
+      const char *linkformat = "../%s/_log";
+      char *packagelink = malloc(strlen(packagename) + strlen(linkformat));
+      sprintf(packagelink, linkformat, packagename);
+      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, packagename, &st, packagelink);
+      free(packagelink);
     }
   }
 }
@@ -180,7 +231,7 @@ static void expat_api_dir_end(void *ud, const XML_Char *name)
 {
   struct filbuf *fb = (struct filbuf *)ud;
   /* end of API directory */
-  if (!strcmp(name, "directory") || !strcmp(name, "binarylist")) {
+  if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result")) {
     fb->in_dir = 0;
   }
 }
@@ -216,13 +267,17 @@ static int path_depth(const char *path)
   return count;
 }
 
-static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *api_path)
+static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *fs_path, const char *api_path,
+                      const char *filter_attr, const char *filter_value)
 {
   char *urlbuf;	/* used to compose the full API URL */
   CURL *curl;
   CURLcode ret;
   XML_Parser xp;
   struct filbuf fb;	/* data the expat callbacks need */
+  
+  fprintf(stderr, "parsing directory %s\n", api_path);
+  
   xp = XML_ParserCreate(NULL);   /* create an expat parser */
   if (!xp)
     abort();
@@ -230,9 +285,12 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   /* copy some data that the parser callbacks will need */
   fb.filler = filler;
   fb.buf = buf;
-  fb.path = api_path;
+  fb.fs_path = fs_path;
+  fb.api_path = api_path;
   fb.cdir = newdir;
   fb.in_dir = 0;
+  fb.filter_attr = filter_attr;
+  fb.filter_value = filter_value;
   XML_SetUserData(xp, (void *)&fb);	/* pass the data to the parser */
 
   /* set handlers for start and end tags */
@@ -292,29 +350,53 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     /* not in cache, we have to retrieve it from the API server */
     dir_t *newdir = dir_cache_new(path); /* get directory cache handle */
 
-    parse_dir(buf, filler, newdir, path);
+    char *bpath = strdup(path);
+    if (!strncmp("/build", path, 6) && path_depth(path) == 4 && !strcmp(basename(bpath), "_failed")) {
+      char *strtokp;
+      strtok_r(bpath, "/", &strtokp); /* skip "build" */
+      const char *project = strtok_r(NULL, "/", &strtokp);
+      const char *repo = strtok_r(NULL, "/", &strtokp);
+      const char *arch = strtok_r(NULL, "/", &strtokp);
+      char *respath = malloc(strlen(project) + strlen(repo) + strlen(arch) + 100 /* too lazy to count right now */);
+      sprintf(respath, "/build/%s/_result?repository=%s&arch=%s", project, repo, arch);
+      parse_dir(buf, filler, newdir, path, respath, "code", "failed");
+      free(respath);
+    }
+    else
+      parse_dir(buf, filler, newdir, path, path, NULL, NULL);
+    free(bpath);
     
     /* check if we need to add additional nodes */
     /* Most of the available API is not exposed through directories. We have to know
        about it and add them ourselves at the appropriate places. */
     fprintf(stderr, "path depth of %s is %d\n", path, path_depth(path));
     
-    /* log, history, status, and reason for packages */
-    if (!strncmp("/build", path, 6) && path_depth(path) == 4) {
-      int i;
-      struct stat st;
-
-      memset(&st, 0, sizeof(struct stat));
-      st.st_mode = S_IFREG;
-      /* st.st_size = 4096; not sure if this is a good idea */
-      
-      /* package status APIs */
-      const char const *status_api[] = {
-        "_history", "_reason", "_status", "_log", NULL
-      };
-      for (i = 0; status_api[i]; i++) {
-        add_dir_node(buf, filler, newdir, path, status_api[i], &st);
+    if (!strncmp("/build", path, 6)) {
+      /* log, history, status, and reason for packages */
+      if (path_depth(path) == 3) {
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        st.st_mode = S_IFDIR;
+        add_dir_node(buf, filler, newdir, path, "_failed", &st, NULL);
       }
+      char *fpath = strdup(path);
+      if (path_depth(path) == 4 && strcmp(basename(fpath), "_failed")) {
+        int i;
+        struct stat st;
+
+        memset(&st, 0, sizeof(struct stat));
+        st.st_mode = S_IFREG;
+        /* st.st_size = 4096; not sure if this is a good idea */
+        
+        /* package status APIs */
+        const char const *status_api[] = {
+          "_history", "_reason", "_status", "_log", NULL
+        };
+        for (i = 0; status_api[i]; i++) {
+          add_dir_node(buf, filler, newdir, path, status_api[i], &st, NULL);
+        }
+      }
+      free(fpath);
     }
   }
   return 0;
@@ -396,7 +478,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   if (fstat(fi->fh, &st)) {
     perror("fstat");
   }
-  attr_cache_add(path, &st);
+  attr_cache_add(path, &st, NULL); /* FIXME: could we get here for a symlink? */
 
   return 0;
 }
@@ -454,6 +536,7 @@ static struct fuse_operations obsfs_oper = {
   .readdir = obsfs_readdir,
   .open = obsfs_open,
   .read = obsfs_read,
+  .readlink = obsfs_readlink,
 };
 
 int main(int argc, char *argv[])
