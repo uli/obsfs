@@ -348,6 +348,11 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
   dirent_t *cached_dirents;
   int cached_dirents_size;
 
+  if (filler) {
+    filler(buf, ".", NULL, 0);
+    filler(buf, "..", NULL, 0);
+  }
+  
   /* see if we have this directory cached already */
   cached_dirents_size = dir_cache_find(&cached_dirents, path);
   if (cached_dirents_size != -1) {
