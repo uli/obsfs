@@ -58,7 +58,7 @@ static void stat_default_file(struct stat *st)
 static void stat_make_dir(struct stat *st)
 {
   st->st_mode = S_IFDIR | 0755;
-  st->st_nlink = 2;
+  st->st_nlink = 42;
 }
 
 static void stat_default_dir(struct stat *st)
