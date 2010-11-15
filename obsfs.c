@@ -504,12 +504,16 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       }
       /* log, history, status, and reason for packages */
       char *fpath = strdup(path);
-      if (path_depth(path) == 4 && strcmp(basename(fpath), "_failed")) {
+      if (path_depth(path) == 4			/* build/.../.../.../... */
+          && strcmp(basename(fpath), "_failed") /* but not build/.../.../.../_failed */
+         ) {
         int i;
         struct stat st;
 
         stat_default_file(&st);
-        /* st.st_size = 4096; not sure if this is a good idea */
+        /* st.st_size = 4096; not sure if this is a good idea;
+           this entry is corrected to reflect the actual size
+           when the file is treated by obsfs_open() */
         
         /* package status APIs */
         const char const *status_api[] = {
