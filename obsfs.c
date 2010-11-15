@@ -132,7 +132,9 @@ static int obsfs_readlink(const char *path, char *buf, size_t buflen)
   attr_t *ret = attr_cache_find(path);
   if (ret) {
 found:
-    strncpy(buf, ret->link, buflen - 1);
+    if (!ret->symlink)
+      return -1;
+    strncpy(buf, ret->symlink, buflen - 1);
     buf[buflen-1] = 0;
     return 0;
   }
@@ -154,6 +156,7 @@ struct filbuf {
   fuse_fill_dir_t filler;	/* buffer filler function */
   const char *fs_path;		/* directory to read... */
   const char *api_path;		/* ... and where to get it from */
+  const char *mangled_path;	/* canonical FS path if fs_path is an alias */
   dir_t *cdir;			/* dir cache entry to fill in */
   int in_dir;			/* flag set when inside a <directory> or <binarylist> */
   const char *filter_attr;
@@ -162,7 +165,7 @@ struct filbuf {
 };
 
 /* add a node to a FUSE directory buffer, a directory cache entry, and the attribute cache */
-static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *path, const char *node_name, struct stat *st, const char *link)
+static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *path, const char *node_name, struct stat *st, const char *symlink, const char *hardlink)
 {
   char *full_path;
   /* add node to the directory buffer (if any) */
@@ -172,7 +175,7 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
   /* compose a full path and add node to the attribute cache */
   full_path = malloc(strlen(path) + 1 /* slash */ + strlen(node_name) + 1 /* null */);
   sprintf(full_path, "%s/%s", path, node_name);
-  attr_cache_add(full_path, st, link);
+  attr_cache_add(full_path, st, symlink, hardlink);
   
   /* add node to the directory cache entry */
   dir_cache_add(newdir, node_name, S_ISDIR(st->st_mode) ? 1 : 0);
@@ -229,12 +232,13 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
     if (filename) {
       char *relink_dir = NULL;
       if (fb->relink) {
+        /* have this entry symlink to a file with the same name in a different directory */
         relink_dir = malloc(strlen(fb->relink) + strlen(filename) + 1);
         sprintf(relink_dir, fb->relink, filename);
-        fprintf(stderr, "YYYYYYYYYY relinking to %s from %s\n", relink_dir, fb->fs_path);
+        //fprintf(stderr, "YYYYYYYYYY relinking to %s from %s\n", relink_dir, fb->fs_path);
         st.st_mode = S_IFLNK;
       }
-      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, relink_dir);
+      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, relink_dir, NULL);
       if (relink_dir)
         free(relink_dir);
     }
@@ -251,16 +255,26 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       }
       if (!strcmp(atts[0], "package")) {
         packagename = atts[1];
-        st.st_mode = S_IFLNK;
+        stat_make_file(&st);
       }
       /* FIXME: parse endtime */
     }
     if (packagename) {
-      const char *linkformat = "../%s/_log";
-      char *packagelink = malloc(strlen(packagename) + strlen(linkformat));
-      sprintf(packagelink, linkformat, packagename);
-      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, packagename, &st, packagelink);
-      free(packagelink);
+      /* hardlink to the log file in the package directory */
+      char *hardlink = malloc(strlen(fb->mangled_path) + strlen(packagename) + 10);
+      
+      /* we could either be at build/<project>/_failed/<repo>/<arch> or at
+         build/<project>/<repo>/<arch>/_failed, so we use the canonical
+         path, which is always the latter */
+      strcpy(hardlink, fb->mangled_path);
+      
+      *(strrchr(hardlink, '/')+1) = 0; /* strip last path element ("_failed") */
+      strcat(hardlink, packagename);
+      strcat(hardlink, "/_log");
+      
+      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, packagename, &st, NULL, hardlink);
+
+      free(hardlink);
     }
   }
 }
@@ -307,7 +321,7 @@ static int path_depth(const char *path)
 }
 
 static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *fs_path, const char *api_path,
-                      const char *filter_attr, const char *filter_value, const char *relink)
+                      const char *mangled_path, const char *filter_attr, const char *filter_value, const char *relink)
 {
   char *urlbuf;	/* used to compose the full API URL */
   CURL *curl;
@@ -326,6 +340,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   fb.buf = buf;
   fb.fs_path = fs_path;
   fb.api_path = api_path;
+  fb.mangled_path = mangled_path;
   fb.cdir = newdir;
   fb.in_dir = 0;
   fb.filter_attr = filter_attr;
@@ -358,17 +373,18 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   free(urlbuf);
 }
 
+/* string appendectomy: remove "appendix" by copying the non-"appendix"
+   parts of "patient" to a new string and returning it */
 static char *strstripcpy(char *patient, const char *appendix)
 {
   char *ret;
   char *apploc = strstr(patient, appendix);
   if (!apploc)
-    return NULL;
-  ret = malloc(strlen(patient));
-  strncpy(ret, patient, apploc - patient);
-  ret[apploc - patient] = 0;
-  strcat(ret + (apploc - patient), apploc + strlen(appendix));
-  fprintf(stderr,"OMG! %s\n", ret);
+    return NULL;				/* nothing found */
+  ret = malloc(strlen(patient) + 1);		/* the new string is not likely to be larger than the old one */
+  strncpy(ret, patient, apploc - patient);	/* copy everything up to "appendix" */
+  ret[apploc - patient] = 0;			/* terminate string (in case the following strcat() is a NOP */
+  strcat(ret + (apploc - patient), apploc + strlen(appendix));	/* copy stuff after "appendix" */
   return ret;
 }
 
@@ -378,7 +394,8 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
 {
   dirent_t *cached_dirents;
   int cached_dirents_size;
-
+  int mangled_path = 0;
+  
   if (filler) {
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
@@ -409,62 +426,82 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     /* not in cache, we have to retrieve it from the API server */
     dir_t *newdir = dir_cache_new(path); /* get directory cache handle */
 
-    char *rpath = strdup(path);
+    char *canon_path = strdup(path);
     char *fpath;
-    if ((fpath = strstr(rpath, "/_failed"))) {
-      if (path_depth(path) == 2) {
-        char *opath = rpath;
-        rpath = strstripcpy(opath, "/_failed");
+    
+    /* handle the build/<project>/_failed/... tree
+       This tree collects all the fail logs to make it easier to get
+       an overview of failing packages using, for instance, find. */
+    if ((fpath = strstr(canon_path, "/_failed"))) {
+      char *opath = canon_path;		/* original path requested */
+      switch (path_depth(path)) {
+      case 2:
+      case 3:
+        /* build/<project>/_failed and build/<project>/_failed/<foo> are
+           equivalent to build/<project> and build/<project>/<foo>, respectively */
+        canon_path = strstripcpy(opath, "/_failed");	/* remove the "/_failed" */
         free(opath);
-      }
-      else if (path_depth(path) == 3) {
-        char *strtokp;
-        char *opath = rpath;
-        rpath = strstripcpy(opath, "/_failed");
+        mangled_path = 1;	/* remember that we messed with the path so we don't add
+                                   another "_failed" entry to this directory */
+        break;
+      case 4:
+        /* build/<project>/_failed/<foo>/<bar> is equivalent to
+           build/<project>/<foo>/<bar>/_failed */
+        canon_path = strstripcpy(opath, "/_failed");	/* remove "/_failed" */
         free(opath);
-        char *bpath = strdup(rpath);
-        strtok_r(bpath, "/", &strtokp); /* skip "build" */
-        strtok_r(NULL, "/", &strtokp);  /* skip project */
-        const char *repo = strtok_r(NULL, "/", &strtokp);
-        char *link = malloc(18 + strlen(repo));
-        sprintf(link, "../../%s/%%s/_failed", repo);
-        fprintf(stderr,"XXXXXXXXXXXXXXXXX lullerparsing %s\n", link);
-        parse_dir(buf, filler, newdir, path, rpath, NULL, NULL, link);
-        free(link);
-        free(rpath);
-        free(bpath);
-        return 0;
+        strcat(canon_path, "/_failed");		/* ...and add it again at the end */
+        mangled_path = 1;
+        break;
+      default:
+        break;
       }
     }
-    char *bpath = strdup(rpath);
-    if (!strncmp("/build", rpath, 6) && path_depth(rpath) == 4 && !strcmp(basename(bpath), "_failed")) {
+    char *bpath = strdup(canon_path);	/* copy used for strtok_r() dissection */
+    /* Is this the (canonical) "_failed" directory? */
+    if (!strncmp("/build", canon_path, 6)	/* in the /build tree? */
+        && path_depth(canon_path) == 4		/* below <arch> directory? */
+        && !strcmp(basename(bpath), "_failed")	/* basename "_failed"? */
+       ) {
+
+      /* dissect path to find project, repo, and architecture */
       char *strtokp;
       strtok_r(bpath, "/", &strtokp); /* skip "build" */
       const char *project = strtok_r(NULL, "/", &strtokp);
       const char *repo = strtok_r(NULL, "/", &strtokp);
       const char *arch = strtok_r(NULL, "/", &strtokp);
+
+      /* construct the API server path for "failed" results */
       char *respath = malloc(strlen(project) + strlen(repo) + strlen(arch) + 100 /* too lazy to count right now */);
       sprintf(respath, "/build/%s/_result?repository=%s&arch=%s", project, repo, arch);
-      parse_dir(buf, filler, newdir, path, respath, "code", "failed", NULL);
+      
+      /* parse only those entries that have attribute "code" with value "failed" */
+      parse_dir(buf, filler, newdir, path, respath, canon_path, "code", "failed", NULL);
       free(respath);
     }
-    else
-      parse_dir(buf, filler, newdir, path, rpath, NULL, NULL, NULL);
+    else {
+      /* regular directory, no special handling */
+      parse_dir(buf, filler, newdir, path, canon_path, canon_path, NULL, NULL, NULL);
+    }
     free(bpath);
-    free(rpath);
+    free(canon_path);
     
     /* check if we need to add additional nodes */
     /* Most of the available API is not exposed through directories. We have to know
        about it and add them ourselves at the appropriate places. */
     fprintf(stderr, "path depth of %s is %d\n", path, path_depth(path));
     
-    if (!strncmp("/build", path, 6)) {
-      /* log, history, status, and reason for packages */
-      if (path_depth(path) == 3) {
+    /* special entries for /build tree */
+    if (!mangled_path			/* no additional nodes if we have messed with the path */
+        && !strncmp("/build", path, 6)
+       ) {
+      /* "_failed" directories */
+      if (path_depth(path) == 3 || path_depth(path) == 1) {
+        /* build/<project>/<repo>/<arch>/_failed and build/_failed */
         struct stat st;
         stat_default_dir(&st);
-        add_dir_node(buf, filler, newdir, path, "_failed", &st, NULL);
+        add_dir_node(buf, filler, newdir, path, "_failed", &st, NULL, NULL);
       }
+      /* log, history, status, and reason for packages */
       char *fpath = strdup(path);
       if (path_depth(path) == 4 && strcmp(basename(fpath), "_failed")) {
         int i;
@@ -478,7 +515,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
           "_history", "_reason", "_status", "_log", NULL
         };
         for (i = 0; status_api[i]; i++) {
-          add_dir_node(buf, filler, newdir, path, status_api[i], &st, NULL);
+          add_dir_node(buf, filler, newdir, path, status_api[i], &st, NULL, NULL);
         }
       }
       free(fpath);
@@ -540,9 +577,19 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   fp = fopen(filename, "w+");
   unlink(filename);
   
+  /* find out if this file is supposed to hardlink somewhere */
+  const char *effective_path = path;
+  attr_t *at = attr_cache_find(path);
+  if (at) {
+    if (at->hardlink) {
+      //fprintf(stderr, "BBBBBBBBB %s hardlinks to %s\n", path, a->hardlink);
+      effective_path = at->hardlink;
+    }
+  }
+
   /* compose the full URL */
-  urlbuf = malloc(strlen(url_prefix) + strlen(path) + 1);
-  sprintf(urlbuf, "%s%s", url_prefix, path);
+  urlbuf = malloc(strlen(url_prefix) + strlen(effective_path) + 1);
+  sprintf(urlbuf, "%s%s", url_prefix, effective_path);
   
   /* retrieve the file from the API server */
   curl = curl_open_file(urlbuf, fwrite, fp);
@@ -563,7 +610,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   if (fstat(fi->fh, &st)) {
     perror("fstat");
   }
-  attr_cache_add(path, &st, NULL); /* FIXME: could we get here for a symlink? */
+  attr_cache_add(path, &st, NULL, NULL); /* FIXME: could we get here for a symlink? */
 
   return 0;
 }

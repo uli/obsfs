@@ -24,7 +24,7 @@ void attr_cache_init(void)
 }
 
 /* add an entry to the attribute cache */
-void attr_cache_add(const char *path, struct stat *st, const char *link)
+void attr_cache_add(const char *path, struct stat *st, const char *symlink, const char *hardlink)
 {
   attr_t *h = &attr_hash[hash_string(path) % ATTR_CACHE_SIZE];
 
@@ -36,8 +36,10 @@ void attr_cache_add(const char *path, struct stat *st, const char *link)
 
   h->path = strdup(path);
   h->st = *st;
-  if (link)
-    h->link = strdup(link);
+  if (symlink)
+    h->symlink = strdup(symlink);
+  if (hardlink)
+    h->hardlink = strdup(hardlink);
 }
 
 /* retrieve an entry from the attribute cache */
@@ -62,8 +64,10 @@ void attr_cache_free(void)
   for (i = 0; i < ATTR_CACHE_SIZE; i++) {
     if (attr_hash[i].path)
       free(attr_hash[i].path);
-    if (attr_hash[i].link)
-      free(attr_hash[i].link);
+    if (attr_hash[i].symlink)
+      free(attr_hash[i].symlink);
+    if (attr_hash[i].hardlink)
+      free(attr_hash[i].hardlink);
   }
   /* FIXME: shouldn't we clear the array here? */
 }

@@ -3,7 +3,8 @@
 typedef struct {
   char *path;
   struct stat st;
-  char *link;
+  char *symlink;
+  char *hardlink;
 } attr_t;
 
 /* one node of a directory cache entry */
@@ -21,7 +22,7 @@ typedef struct {
 
 /* attribute cache methods */
 void attr_cache_init(void);
-void attr_cache_add(const char *path, struct stat *st, const char *link);
+void attr_cache_add(const char *path, struct stat *st, const char *symlink, const char *hardlink);
 attr_t *attr_cache_find(const char *path);
 void attr_cache_free(void);
 
