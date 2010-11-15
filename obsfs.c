@@ -347,6 +347,20 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   free(urlbuf);
 }
 
+static char *strstripcpy(char *patient, const char *appendix)
+{
+  char *ret;
+  char *apploc = strstr(patient, appendix);
+  if (!apploc)
+    return NULL;
+  ret = malloc(strlen(patient));
+  strncpy(ret, patient, apploc - patient);
+  ret[apploc - patient] = 0;
+  strcat(ret + (apploc - patient), apploc + strlen(appendix));
+  fprintf(stderr,"OMG! %s\n", ret);
+  return ret;
+}
+
 /* read an API directory and fill in the FUSE directory buffer, the directory
    cache, and the attribute cache */
 static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
@@ -384,8 +398,24 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     /* not in cache, we have to retrieve it from the API server */
     dir_t *newdir = dir_cache_new(path); /* get directory cache handle */
 
-    char *bpath = strdup(path);
-    if (!strncmp("/build", path, 6) && path_depth(path) == 4 && !strcmp(basename(bpath), "_failed")) {
+    char *rpath = strdup(path);
+    char *fpath;
+    if ((fpath = strstr(rpath, "/_failed"))) {
+      if (path_depth(path) >= 2 && path_depth(path) <= 3) {
+        char *opath = rpath;
+        rpath = strstripcpy(opath, "/_failed");
+        free(opath);
+      }
+      else if (path_depth(path) == 4) {
+        char *opath = rpath;
+        rpath = strstripcpy(opath, "/_failed");
+        strcat(rpath, "/_failed");
+        fprintf(stderr,"-----XXXX------------ %s --------------------\n", rpath);
+        free(opath);
+      }
+    }
+    char *bpath = strdup(rpath);
+    if (!strncmp("/build", rpath, 6) && path_depth(rpath) == 4 && !strcmp(basename(bpath), "_failed")) {
       char *strtokp;
       strtok_r(bpath, "/", &strtokp); /* skip "build" */
       const char *project = strtok_r(NULL, "/", &strtokp);
@@ -397,8 +427,9 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       free(respath);
     }
     else
-      parse_dir(buf, filler, newdir, path, path, NULL, NULL);
+      parse_dir(buf, filler, newdir, path, rpath, NULL, NULL);
     free(bpath);
+    free(rpath);
     
     /* check if we need to add additional nodes */
     /* Most of the available API is not exposed through directories. We have to know
