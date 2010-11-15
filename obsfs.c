@@ -119,7 +119,8 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
       else {
         /* file not found */
         /* FIXME: should we still have this fallback? */
-        stat_make_dir(stbuf);
+        //stat_make_dir(stbuf);
+        return -1;
       }
     }
   }
