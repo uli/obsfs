@@ -4,21 +4,19 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 attr_t attr_hash[ATTR_CACHE_SIZE];
 dir_t dir_hash[DIR_CACHE_SIZE];
 
-/* simplistic string hashing function */
-static uint32_t hash_string(const char *str)
+unsigned int hash_string(const char *p)
 {
-  uint32_t c = 0;
-  while (*str) {
-    c = (c << 8) | ((c >> 24) ^ *str);
-    str++;
-  }
-  return c;
+  unsigned int h = 0;
+  for(; *p; p++)
+    h = 31 * h + *p;
+  return h;
 }
-
+          
 /* clear attribute cache */
 void attr_cache_init(void)
 {
@@ -31,8 +29,10 @@ void attr_cache_add(const char *path, struct stat *st, const char *link)
   attr_t *h = &attr_hash[hash_string(path) % ATTR_CACHE_SIZE];
 
   /* we don't care about collisions, but we need to free() old entries if any */
-  if (h->path)
+  if (h->path) {
+    fprintf(stderr, "ATTR hash collision %s (0x%x, new) vs. %s (0x%x)\n", path, hash_string(path), h->path, hash_string(h->path));
     free(h->path);
+  }
 
   h->path = strdup(path);
   h->st = *st;

@@ -158,6 +158,7 @@ struct filbuf {
   int in_dir;			/* flag set when inside a <directory> or <binarylist> */
   const char *filter_attr;
   const char *filter_value;
+  const char *relink;
 };
 
 /* add a node to a FUSE directory buffer, a directory cache entry, and the attribute cache */
@@ -226,7 +227,16 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       atts += 2; /* expat hands us a string array with name/value pairs */
     }
     if (filename) {
-      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, NULL);
+      char *relink_dir = NULL;
+      if (fb->relink) {
+        relink_dir = malloc(strlen(fb->relink) + strlen(filename) + 1);
+        sprintf(relink_dir, fb->relink, filename);
+        fprintf(stderr, "YYYYYYYYYY relinking to %s from %s\n", relink_dir, fb->fs_path);
+        st.st_mode = S_IFLNK;
+      }
+      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, relink_dir);
+      if (relink_dir)
+        free(relink_dir);
     }
   }
   
@@ -297,7 +307,7 @@ static int path_depth(const char *path)
 }
 
 static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *fs_path, const char *api_path,
-                      const char *filter_attr, const char *filter_value)
+                      const char *filter_attr, const char *filter_value, const char *relink)
 {
   char *urlbuf;	/* used to compose the full API URL */
   CURL *curl;
@@ -305,7 +315,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   XML_Parser xp;
   struct filbuf fb;	/* data the expat callbacks need */
   
-  fprintf(stderr, "parsing directory %s\n", api_path);
+  fprintf(stderr, "parsing directory %s (API %s)\n", fs_path, api_path);
   
   xp = XML_ParserCreate(NULL);   /* create an expat parser */
   if (!xp)
@@ -320,6 +330,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   fb.in_dir = 0;
   fb.filter_attr = filter_attr;
   fb.filter_value = filter_value;
+  fb.relink = relink;
   XML_SetUserData(xp, (void *)&fb);	/* pass the data to the parser */
 
   /* set handlers for start and end tags */
@@ -401,17 +412,28 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     char *rpath = strdup(path);
     char *fpath;
     if ((fpath = strstr(rpath, "/_failed"))) {
-      if (path_depth(path) >= 2 && path_depth(path) <= 3) {
+      if (path_depth(path) == 2) {
         char *opath = rpath;
         rpath = strstripcpy(opath, "/_failed");
         free(opath);
       }
-      else if (path_depth(path) == 4) {
+      else if (path_depth(path) == 3) {
+        char *strtokp;
         char *opath = rpath;
         rpath = strstripcpy(opath, "/_failed");
-        strcat(rpath, "/_failed");
-        fprintf(stderr,"-----XXXX------------ %s --------------------\n", rpath);
         free(opath);
+        char *bpath = strdup(rpath);
+        strtok_r(bpath, "/", &strtokp); /* skip "build" */
+        strtok_r(NULL, "/", &strtokp);  /* skip project */
+        const char *repo = strtok_r(NULL, "/", &strtokp);
+        char *link = malloc(18 + strlen(repo));
+        sprintf(link, "../../%s/%%s/_failed", repo);
+        fprintf(stderr,"XXXXXXXXXXXXXXXXX lullerparsing %s\n", link);
+        parse_dir(buf, filler, newdir, path, rpath, NULL, NULL, link);
+        free(link);
+        free(rpath);
+        free(bpath);
+        return 0;
       }
     }
     char *bpath = strdup(rpath);
@@ -423,11 +445,11 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       const char *arch = strtok_r(NULL, "/", &strtokp);
       char *respath = malloc(strlen(project) + strlen(repo) + strlen(arch) + 100 /* too lazy to count right now */);
       sprintf(respath, "/build/%s/_result?repository=%s&arch=%s", project, repo, arch);
-      parse_dir(buf, filler, newdir, path, respath, "code", "failed");
+      parse_dir(buf, filler, newdir, path, respath, "code", "failed", NULL);
       free(respath);
     }
     else
-      parse_dir(buf, filler, newdir, path, rpath, NULL, NULL);
+      parse_dir(buf, filler, newdir, path, rpath, NULL, NULL, NULL);
     free(bpath);
     free(rpath);
     
