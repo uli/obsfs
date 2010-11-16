@@ -20,6 +20,14 @@
 static const char *hello_str = "Hello World!\n";
 static const char *hello_path = "/hello";
 
+const char *root_dir[] = {
+  "/build",
+  "/source",
+  "/published",
+  "/request",
+  NULL
+};
+
 char *file_cache_dir = NULL;	/* directory to keep cached file contents in */
 int file_cache_count = 1;	/* used to make up names for cached files */
 
@@ -70,12 +78,22 @@ static void stat_default_dir(struct stat *st)
 static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                          off_t offset, struct fuse_file_info *fi);
                          
+static int is_in_root_dir(const char *path)
+{
+  const char **d = root_dir;
+  for(; *d; d++) {
+    if (!strcmp(*d, path))
+      return 1;
+  }
+  return 0;
+}
+
 static int obsfs_getattr(const char *path, struct stat *stbuf)
 {
   /* initialize the stat buffer we are going to fill in */
   memset(stbuf, 0, sizeof(struct stat));
   
-  if (strcmp(path, "/") == 0 || strcmp(path, "/build") == 0) {
+  if (strcmp(path, "/") == 0 || is_in_root_dir(path)) {
     /* root and the stuff inside it cannot be deduced because the server
        returns a human-readable info page for "/", so they are hardcoded
        here. */
@@ -190,6 +208,11 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
   free(full_path);
 }
 
+static int endswith(const char *str, const char *end)
+{
+  return !strcmp(str + strlen(str) - strlen(end), end);
+}
+
 /* expat tag start callback for reading API directories */
 static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char **atts)
 {
@@ -208,6 +231,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   if (fb->in_dir && (!strcmp(name, "entry") || !strcmp(name, "binary"))) {
     const char *filename = NULL;
     
+    stat_make_dir(&st);	/* assume it's a directory until we know better */
     /* process all attributes */
     while (*atts) {
       if (fb->filter_attr && !strcmp(atts[0], fb->filter_attr) && strcmp(atts[1], fb->filter_value)) {
@@ -217,16 +241,23 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       if (!strcmp(atts[0], "name")) {
         /* entry in a "directory" directory; we assume it is itself a directory */
         filename = atts[1];
-        stat_make_dir(&st);
+        /* Muddy waters:
+           - There are entries in the /published tree that don't
+             have a size, but are files anyway.
+           - Everything in /request is a file. */
+        if (endswith(filename, ".rpm") || endswith(fb->api_path, "/request"))
+          stat_make_file(&st);
       }
       else if (!strcmp(atts[0], "filename")) {
-        /* entry in a "binarylist" directory, this is always a regular file */
         filename = atts[1];
+        /* entry in a "binarylist" directory, this is always a regular file */
         stat_make_file(&st);
       }
       else if (!strcmp(atts[0], "size")) {
         /* file size */
         st.st_size = atoi(atts[1]);
+        /* an entry with a size is always a regular file */
+        stat_make_file(&st);
       }
       atts += 2; /* expat hands us a string array with name/value pairs */
     }
@@ -547,7 +578,11 @@ static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     filler(buf, "..", NULL, 0);
     filler(buf, hello_path + 1, NULL, 0);
     st.st_mode = S_IFDIR;
-    filler(buf, "build", &st, 0);
+    const char **d;
+    /* fill in the root directory entries */
+    for(d = root_dir; *d; d++) {
+      filler(buf, (*d)+1 /* skip slash */, &st, 0);
+    }
   }
   
   /* If it's not the root directory, we get it from the API server (or dir cache). */
