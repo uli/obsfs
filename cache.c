@@ -6,76 +6,79 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-attr_t attr_hash[ATTR_CACHE_SIZE];
-dir_t dir_hash[DIR_CACHE_SIZE];
+attr_t *attr_hash;
+dir_t *dir_hash;
 
-unsigned int hash_string(const char *p)
-{
-  unsigned int h = 0;
-  for(; *p; p++)
-    h = 31 * h + *p;
-  return h;
-}
-          
 /* clear attribute cache */
 void attr_cache_init(void)
 {
-  memset(attr_hash, 0, sizeof(attr_hash));
+  attr_hash = NULL;
+}
+
+static void free_attr(attr_t *h)
+{
+    free(h->path);
+    if (h->symlink)
+      free(h->symlink);
+    if (h->hardlink)
+      free(h->hardlink);
+    free(h);
 }
 
 /* add an entry to the attribute cache */
 void attr_cache_add(const char *path, struct stat *st, const char *symlink, const char *hardlink)
 {
-  attr_t *h = &attr_hash[hash_string(path) % ATTR_CACHE_SIZE];
+  attr_t *h = calloc(1, sizeof(attr_t));
 
-  /* we don't care about collisions, but we need to free() old entries if any */
-  if (h->path) {
-    fprintf(stderr, "ATTR hash collision %s (0x%x, new) vs. %s (0x%x)\n", path, hash_string(path), h->path, hash_string(h->path));
-    free(h->path);
-  }
-
+  /* create the new entry; do this before deleting the old one because symlink
+     and hardlink may point to it */
   h->path = strdup(path);
   h->st = *st;
   if (symlink)
     h->symlink = strdup(symlink);
   if (hardlink)
     h->hardlink = strdup(hardlink);
+  
+  /* need to delete old entry, if any */
+  attr_t *old;
+  HASH_FIND_STR(attr_hash, path, old);
+  if (old) {
+    fprintf(stderr, "ATTR CACHE: found old entry for %s\n", path);
+    HASH_DEL(attr_hash, old);
+    free_attr(old);
+  }
+  
+  /* can't use the HASH_ADD_STR() convenience macro here because it
+     expects the key to be an array inside the hash structure, not
+     a pointer somewhere else; HASH_FIND_STR() works fine, though. */
+  HASH_ADD_KEYPTR(hh, attr_hash, h->path, strlen(h->path), h);
 }
 
 /* retrieve an entry from the attribute cache */
 attr_t *attr_cache_find(const char *path)
 {
-  attr_t *h = &attr_hash[hash_string(path) % ATTR_CACHE_SIZE];
-  if (h->path) {
-    /* is this actually the entry we're looking for, or just one with the same hash? */
-    if (strcmp(path, h->path))
-      return NULL;	/* cache miss */
-    else
-      return h;	/* cache hit */
-  }
-  else
-    return NULL;	/* cache miss */
+  attr_t *h;
+  HASH_FIND_STR(attr_hash, path, h);
+  if (h)
+    fprintf(stderr, "ATTR CACHE: found hash entry for %s\n", path);
+  return h;
 }
 
 /* free() memory used by attribute cache entries */
 void attr_cache_free(void)
 {
-  int i;
-  for (i = 0; i < ATTR_CACHE_SIZE; i++) {
-    if (attr_hash[i].path)
-      free(attr_hash[i].path);
-    if (attr_hash[i].symlink)
-      free(attr_hash[i].symlink);
-    if (attr_hash[i].hardlink)
-      free(attr_hash[i].hardlink);
+  attr_t *h, *tmp;
+  /* delete every attr_hash entry in the table and in memory */
+  HASH_ITER(hh, attr_hash, h, tmp) {
+    HASH_DEL(attr_hash, h);
+    free_attr(h);
   }
-  /* FIXME: shouldn't we clear the array here? */
 }
 
 /* clear directory cache */
 void dir_cache_init(void)
 {
-  memset(dir_hash, 0, sizeof(dir_t) * DIR_CACHE_SIZE);
+  dir_hash = NULL;
 }
 
 /* free() the memory occupied by a directory cache entry (if any) */
@@ -91,19 +94,30 @@ static void free_dir(dir_t *d)
       free(d->entries);
     }
   }
+  free(d);
 }
 
 /* create a new directory cache entry */
 dir_t *dir_cache_new(const char *path)
 {
-  dir_t *d = &dir_hash[hash_string(path) % DIR_CACHE_SIZE];
-
+  dir_t *d;
+  HASH_FIND_STR(dir_hash, path, d);
   /* we don't care about collisions, but we need to free() an old entry there is one */
-  free_dir(d);
+  if (d) {
+    fprintf(stderr, "DIR CACHE: found old entry for %s\n", path);
+    HASH_DEL(dir_hash, d);
+    free_dir(d);
+  }
 
+  d = calloc(1, sizeof(dir_t));
   d->path = strdup(path);
   d->entries = NULL;
   d->num_entries = 0;
+  
+  fprintf(stderr, "DIR CACHE: adding new entry for %s\n", path);
+  //HASH_ADD_STR(dir_hash, path, d);
+  HASH_ADD_KEYPTR(hh, dir_hash, d->path, strlen(d->path), d);
+  
   return d;
 }
 
@@ -122,19 +136,25 @@ void dir_cache_add(dir_t *dir, const char *name, int is_dir)
 /* retrieve a directory cache entry */
 int dir_cache_find(dirent_t **dir, const char *path)
 {
-  dir_t *d = &dir_hash[hash_string(path) % DIR_CACHE_SIZE];
-  if (!d->path || strcmp(d->path, path))
-    return -1;	/* cache miss */
-  *dir = d->entries;
-  return d->num_entries;
+  dir_t *d;
+  HASH_FIND_STR(dir_hash, path, d);
+  if (!d) {
+    fprintf(stderr, "DIR CACHE: no entry found for %s\n", path);
+    return -1;
+  }
+  else {
+    fprintf(stderr, "DIR CACHE: found entry for %s\n", path);
+    *dir = d->entries;
+    return d->num_entries;
+  }
 }
 
 /* free() memory used by directory cache entries */
 void dir_cache_free(void)
 {
-  int i;
-  for (i = 0; i < DIR_CACHE_SIZE; i++) {
-    free_dir(&dir_hash[i]);
+  dir_t *d, *tmp;
+  HASH_ITER(hh, dir_hash, d, tmp) {
+    HASH_DEL(dir_hash, d);
+    free_dir(d);
   }
-  /* FIXME: shouldn't we clear the array here? */
 }

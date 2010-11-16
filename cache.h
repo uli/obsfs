@@ -1,10 +1,12 @@
 #include <sys/stat.h>
+#include "uthash.h"
 
 typedef struct {
   char *path;
   struct stat st;
   char *symlink;
   char *hardlink;
+  UT_hash_handle hh;
 } attr_t;
 
 /* one node of a directory cache entry */
@@ -18,6 +20,7 @@ typedef struct {
   char *path;
   dirent_t *entries;
   int num_entries;
+  UT_hash_handle hh;
 } dir_t;
 
 /* attribute cache methods */
