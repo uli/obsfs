@@ -617,7 +617,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   if (fstat(fi->fh, &st)) {
     perror("fstat");
   }
-  attr_cache_add(path, &st, NULL, NULL); /* FIXME: could we get here for a symlink? */
+  attr_cache_add(path, &st, at? at->symlink : NULL, at? at->hardlink : NULL);
 
   return 0;
 }
