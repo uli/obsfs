@@ -580,6 +580,8 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
 
   /* create the cache file */
   fp = fopen(filename, "w+");
+  if (!fp)
+    return -1;
   unlink(filename);
   
   /* find out if this file is supposed to hardlink somewhere */
