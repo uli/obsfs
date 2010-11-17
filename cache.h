@@ -6,6 +6,7 @@ typedef struct {
   struct stat st;
   char *symlink;
   char *hardlink;
+  time_t timestamp;
   UT_hash_handle hh;
 } attr_t;
 
@@ -20,6 +21,7 @@ typedef struct {
   char *path;
   dirent_t *entries;
   int num_entries;
+  time_t timestamp;
   UT_hash_handle hh;
 } dir_t;
 

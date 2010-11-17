@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 #ifdef CACHE_DEBUG
 #define DEBUG(x...) fprintf(stderr, x)
@@ -46,6 +47,7 @@ void attr_cache_add(const char *path, struct stat *st, const char *symlink, cons
     h->symlink = strdup(symlink);
   if (hardlink)
     h->hardlink = strdup(hardlink);
+  h->timestamp = time(NULL);
   
   /* need to delete old entry, if any */
   attr_t *old;
@@ -67,8 +69,15 @@ attr_t *attr_cache_find(const char *path)
 {
   attr_t *h;
   HASH_FIND_STR(attr_hash, path, h);
-  if (h)
+  if (h) {
     DEBUG("ATTR CACHE: found hash entry for %s\n", path);
+    if (time(NULL) - h->timestamp > ATTR_CACHE_TIMEOUT) {
+      DEBUG("ATTR CACHE: timeout for entry %s, deleting\n", path);
+      HASH_DEL(attr_hash, h);
+      free_attr(h);
+      return NULL;
+    }
+  }
   return h;
 }
 
@@ -121,6 +130,7 @@ dir_t *dir_cache_new(const char *path)
   d->path = strdup(path);
   d->entries = NULL;
   d->num_entries = 0;
+  d->timestamp = time(NULL);
   
   DEBUG("DIR CACHE: adding new entry for %s\n", path);
   HASH_ADD_KEYPTR(hh, dir_hash, d->path, strlen(d->path), d);
@@ -151,6 +161,12 @@ int dir_cache_find(dirent_t **dir, const char *path)
   }
   else {
     DEBUG("DIR CACHE: found entry for %s\n", path);
+    if (time(NULL) - d->timestamp > DIR_CACHE_TIMEOUT) {
+      DEBUG("DIR CACHE: timeout for entry %s, deleting\n", path);
+      HASH_DEL(dir_hash, d);
+      free_dir(d);
+      return -1;
+    }
     *dir = d->entries;
     return d->num_entries;
   }
