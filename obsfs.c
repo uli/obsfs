@@ -198,6 +198,29 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
   /* compose a full path and add node to the attribute cache */
   full_path = malloc(strlen(path) + 1 /* slash */ + strlen(node_name) + 1 /* null */);
   sprintf(full_path, "%s/%s", path, node_name);
+
+  /* Tricky problem: Apparently, FUSE does a LOOKUP (using the getattr
+     method) before every open(), but it only does a GETATTR (also using the
+     getattr method) the first time a file is opened.  That means that our
+     preferred method of updating the file stats in obsfs_open() generally
+     works, but if a directory expires and is retrieved from the server
+     again, we set the size back to size 0.  When the file is opened now,
+     FUSE only does the LOOKUP before open and remembers the wrong file
+     size.  The subsequent obsfs_open() call rectifies it for us, but FUSE
+     doesn't ask us again and won't permit programs to read any data.  The
+     next time the file is opened things are fine again, because the
+     previous obsfs_open() run has set the stats correctly, and when FUSE
+     does a LOOKUP, it gets the right data and will allow programs to read
+     the file.
+     To work around this problem, we simply check if we have a cached copy
+     already and use its size if so. */
+
+  /* check if we have a local copy that we can use to get the size */
+  struct stat local_st;
+  if (!lstat(full_path + 1 /* skip leading slash */, &local_st)) {
+    st->st_size = local_st.st_size;
+  }
+
   attr_cache_add(full_path, st, symlink, hardlink);
   
   /* add node to the directory cache entry */
