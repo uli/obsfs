@@ -129,9 +129,6 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
          without giving it a filler function, so it will only cache
          the entries it finds in the attribute cache, where we can
          subsequently retrieve the one we're looking for. */
-      /* FIXME: Fails if there is a hash collision between the file we're
-         looking for and another one in the same directory, and the latter 
-         comes last. */
       char *dir = strdup(path);	/* dirname modifies its argument, need to copy */
       DEBUG("not found, trying to get directory\n");
       /* call with buf and filler NULL for cache-only operation */
