@@ -1,4 +1,4 @@
-OBJS = obsfs.o cache.o
+OBJS = obsfs.o cache.o util.o
 LIBS = -lfuse -lcurl -lexpat
 CFLAGS = -g -Wall -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE
 

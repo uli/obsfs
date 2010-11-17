@@ -17,6 +17,7 @@
 
 #include "obsfs.h"
 #include "cache.h"
+#include "util.h"
 
 #ifdef DEBUG_OBSFS
 #define DEBUG(x...) fprintf(stderr, x)
@@ -602,9 +603,9 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   char *urlbuf;
   CURL *curl;
   FILE *fp;
-  char filename[11];
   CURLcode ret;
   struct stat st;
+  const char *relpath = path + 1; /* skip leading slash */
   
   /* leftovers from Hello, World example */
   if (strcmp(path, hello_path) == 0) {
@@ -614,16 +615,21 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
     return 0;
   }
 
-  /* make up a file name for the cached file; it doesn't really matter what
-     it looks like, we unlink() it after creation anyway */
-  /* FIXME: racy, all threads share the same temp directory */
-  sprintf(filename, "%d", file_cache_count++);
-
-  /* create the cache file */
-  fp = fopen(filename, "w+");
-  if (!fp)
-    return -1;
-  unlink(filename);
+  fp = fopen(relpath, "r+");
+  if (!fp) {
+    /* create the cache file */
+    if (mkdirp(relpath, 0755))
+      return -1;
+    fp = fopen(relpath, "w+");
+    if (!fp)
+      return -1;
+  }
+  else {
+    /* file already cached */
+    fi->fh = dup(fileno(fp));
+    fclose(fp);
+    return 0;
+  }
   
   /* find out if this file is supposed to hardlink somewhere */
   const char *effective_path = path;
@@ -743,12 +749,16 @@ int main(int argc, char *argv[])
     perror("mkdtemp");
     return -1;
   }
-  
+  /* can't do the chdir() here because we might have a relative
+     mount point specified; will do it in obsfs_init() */
+
   /* Go! */
   ret = fuse_main(args.argc, args.argv, &obsfs_oper, NULL);
   
-  /* remove the file cache; no need to delete any files because they are all
-     unlinked immediately after creation */
+  /* remove the file cache */
+  if (!chdir(file_cache_dir)) {
+    system("rm -fr *");
+  }
   if (rmdir(file_cache_dir)) {
     perror("rmdir");
   }
