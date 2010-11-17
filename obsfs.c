@@ -626,6 +626,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   CURLcode ret;
   struct stat st;
   const char *relpath = path + 1; /* skip leading slash */
+  attr_t *at = attr_cache_find(path);
   
   /* leftovers from Hello, World example */
   if (strcmp(path, hello_path) == 0) {
@@ -643,36 +644,30 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
     fp = fopen(relpath, "w+");
     if (!fp)
       return -1;
-  }
-  else {
-    /* file already cached */
-    fi->fh = dup(fileno(fp));
-    fclose(fp);
-    return 0;
-  }
   
-  /* find out if this file is supposed to hardlink somewhere */
-  const char *effective_path = path;
-  attr_t *at = attr_cache_find(path);
-  if (at) {
-    if (at->hardlink) {
-      //DEBUG("BBBBBBBBB %s hardlinks to %s\n", path, a->hardlink);
-      effective_path = at->hardlink;
+    /* find out if this file is supposed to hardlink somewhere */
+    const char *effective_path = path;
+    if (at) {
+      if (at->hardlink) {
+        //DEBUG("BBBBBBBBB %s hardlinks to %s\n", path, a->hardlink);
+        effective_path = at->hardlink;
+      }
     }
-  }
 
-  /* compose the full URL */
-  urlbuf = malloc(strlen(url_prefix) + strlen(effective_path) + 1);
-  sprintf(urlbuf, "%s%s", url_prefix, effective_path);
-  
-  /* retrieve the file from the API server */
-  curl = curl_open_file(urlbuf, fwrite, fp);
-  if ((ret = curl_easy_perform(curl))) {
-    fprintf(stderr,"curl error %d\n", ret);
+    /* compose the full URL */
+    urlbuf = malloc(strlen(url_prefix) + strlen(effective_path) + 1);
+    sprintf(urlbuf, "%s%s", url_prefix, effective_path);
+    
+    /* retrieve the file from the API server */
+    curl = curl_open_file(urlbuf, fwrite, fp);
+    if ((ret = curl_easy_perform(curl))) {
+      fprintf(stderr,"curl error %d\n", ret);
+    }
+    curl_easy_cleanup(curl);
+    
+    free(urlbuf);
   }
-  curl_easy_cleanup(curl);
   
-  free(urlbuf);
   /* create a new file handle for the cache file, we need it later to retrieve
      the contents (it's unlinked already) */
   fi->fh = dup(fileno(fp));
