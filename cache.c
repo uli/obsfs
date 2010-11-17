@@ -1,10 +1,18 @@
 #include "obsfs.h"
 #include "cache.h"
 
+#define CACHE_DEBUG
+
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+
+#ifdef CACHE_DEBUG
+#define DEBUG(x...) fprintf(stderr, x)
+#else
+#define DEBUG(x...)
+#endif
 
 attr_t *attr_hash;
 dir_t *dir_hash;
@@ -43,7 +51,7 @@ void attr_cache_add(const char *path, struct stat *st, const char *symlink, cons
   attr_t *old;
   HASH_FIND_STR(attr_hash, path, old);
   if (old) {
-    fprintf(stderr, "ATTR CACHE: found old entry for %s\n", path);
+    DEBUG("ATTR CACHE: found old entry for %s\n", path);
     HASH_DEL(attr_hash, old);
     free_attr(old);
   }
@@ -60,7 +68,7 @@ attr_t *attr_cache_find(const char *path)
   attr_t *h;
   HASH_FIND_STR(attr_hash, path, h);
   if (h)
-    fprintf(stderr, "ATTR CACHE: found hash entry for %s\n", path);
+    DEBUG("ATTR CACHE: found hash entry for %s\n", path);
   return h;
 }
 
@@ -104,7 +112,7 @@ dir_t *dir_cache_new(const char *path)
   HASH_FIND_STR(dir_hash, path, d);
   /* we don't care about collisions, but we need to free() an old entry there is one */
   if (d) {
-    fprintf(stderr, "DIR CACHE: found old entry for %s\n", path);
+    DEBUG("DIR CACHE: found old entry for %s\n", path);
     HASH_DEL(dir_hash, d);
     free_dir(d);
   }
@@ -114,8 +122,7 @@ dir_t *dir_cache_new(const char *path)
   d->entries = NULL;
   d->num_entries = 0;
   
-  fprintf(stderr, "DIR CACHE: adding new entry for %s\n", path);
-  //HASH_ADD_STR(dir_hash, path, d);
+  DEBUG("DIR CACHE: adding new entry for %s\n", path);
   HASH_ADD_KEYPTR(hh, dir_hash, d->path, strlen(d->path), d);
   
   return d;
@@ -139,11 +146,11 @@ int dir_cache_find(dirent_t **dir, const char *path)
   dir_t *d;
   HASH_FIND_STR(dir_hash, path, d);
   if (!d) {
-    fprintf(stderr, "DIR CACHE: no entry found for %s\n", path);
+    DEBUG("DIR CACHE: no entry found for %s\n", path);
     return -1;
   }
   else {
-    fprintf(stderr, "DIR CACHE: found entry for %s\n", path);
+    DEBUG("DIR CACHE: found entry for %s\n", path);
     *dir = d->entries;
     return d->num_entries;
   }

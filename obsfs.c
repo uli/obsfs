@@ -1,5 +1,7 @@
 #define FUSE_USE_VERSION  26
 
+#define DEBUG_OBSFS
+
 #include <fuse.h>
 #include <fuse/fuse_opt.h>
 #include <stddef.h>
@@ -15,6 +17,12 @@
 
 #include "obsfs.h"
 #include "cache.h"
+
+#ifdef DEBUG_OBSFS
+#define DEBUG(x...) fprintf(stderr, x)
+#else
+#define DEBUG(x...)
+#endif
 
 /* leftovers from the Hello, World example */
 static const char *hello_str = "Hello World!\n";
@@ -105,11 +113,11 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
   } else {
     /* actual API files and directories */
     attr_t *ret;
-    fprintf(stderr, "getattr: looking for %s\n", path);
+    DEBUG("getattr: looking for %s\n", path);
     /* let's see if we have that cached already */
     ret = attr_cache_find(path);
     if (ret) {
-      fprintf(stderr, "found it!\n");
+      DEBUG("found it!\n");
       *stbuf = ret->st;
     } 
     else {
@@ -124,14 +132,14 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
          looking for and another one in the same directory, and the latter 
          comes last. */
       char *dir = strdup(path);	/* dirname modifies its argument, need to copy */
-      fprintf(stderr, "not found, trying to get directory\n");
+      DEBUG("not found, trying to get directory\n");
       /* call with buf and filler NULL for cache-only operation */
       obsfs_readdir(dirname(dir), NULL, NULL, 0, NULL);
       free(dir);
       /* now the attributes are in the attr cache (if it exists at all) */
       ret = attr_cache_find(path);
       if (ret) {
-        fprintf(stderr, "found it after all\n");
+        DEBUG("found it after all\n");
         *stbuf = ret->st;
       }
       else {
@@ -158,7 +166,7 @@ found:
     return 0;
   }
   char *dir = strdup(path);	/* dirname modifies its argument, need to copy */
-  fprintf(stderr, "link not found, trying to get directory\n");
+  DEBUG("link not found, trying to get directory\n");
   /* call with buf and filler NULL for cache-only operation */
   obsfs_readdir(dirname(dir), NULL, NULL, 0, NULL);
   free(dir);
@@ -267,7 +275,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         /* have this entry symlink to a file with the same name in a different directory */
         relink_dir = malloc(strlen(fb->relink) + strlen(filename) + 1);
         sprintf(relink_dir, fb->relink, filename);
-        //fprintf(stderr, "YYYYYYYYYY relinking to %s from %s\n", relink_dir, fb->fs_path);
+        //DEBUG("YYYYYYYYYY relinking to %s from %s\n", relink_dir, fb->fs_path);
         st.st_mode = S_IFLNK;
       }
       add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, relink_dir, NULL);
@@ -361,7 +369,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   XML_Parser xp;
   struct filbuf fb;	/* data the expat callbacks need */
   
-  fprintf(stderr, "parsing directory %s (API %s)\n", fs_path, api_path);
+  DEBUG("parsing directory %s (API %s)\n", fs_path, api_path);
   
   xp = XML_ParserCreate(NULL);   /* create an expat parser */
   if (!xp)
@@ -389,7 +397,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   
   /* open the URL and set up CURL options */
   curl = curl_open_file(urlbuf, write_adapter, xp);
-  //fprintf(stderr, "username %s pw %s\n", options.api_username, options.api_password);
+  //DEBUG("username %s pw %s\n", options.api_username, options.api_password);
   
   /* perform the actual retrieval; this will instruct curl to get the data from
      the API server and call the write_adapter() for each hunk of data, which will
@@ -520,7 +528,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     /* check if we need to add additional nodes */
     /* Most of the available API is not exposed through directories. We have to know
        about it and add them ourselves at the appropriate places. */
-    fprintf(stderr, "path depth of %s is %d\n", path, path_depth(path));
+    DEBUG("path depth of %s is %d\n", path, path_depth(path));
     
     /* special entries for /build tree */
     if (!mangled_path			/* no additional nodes if we have messed with the path */
@@ -568,7 +576,7 @@ static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   struct stat st;
 
   stat_default_file(&st);
-  fprintf(stderr, "readdir path %s\n", path);
+  DEBUG("readdir path %s\n", path);
   
   /* The API server does not provide us with a root directory; retrieving
      "/" only yields a human-readable info page. We therefore have to
@@ -624,7 +632,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   attr_t *at = attr_cache_find(path);
   if (at) {
     if (at->hardlink) {
-      //fprintf(stderr, "BBBBBBBBB %s hardlinks to %s\n", path, a->hardlink);
+      //DEBUG("BBBBBBBBB %s hardlinks to %s\n", path, a->hardlink);
       effective_path = at->hardlink;
     }
   }
