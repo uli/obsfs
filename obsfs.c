@@ -146,7 +146,7 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
       }
       else {
         /* file not found */
-        return -1;
+        return -ENOENT;
       }
     }
   }
