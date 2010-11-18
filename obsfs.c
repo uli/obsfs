@@ -772,6 +772,35 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
   return 0;
 }
 
+static int obsfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
+{
+  struct stat st;
+  DEBUG("CREATE %s\n", path);
+  
+  /* create a new cache file */
+  mkdirp(path + 1, 0755);
+  if ((fi->fh = open(path + 1 /* skip slash */, O_CREAT|O_RDWR|O_TRUNC, mode)) < 0)
+    return -errno;
+  
+  /* create a new attr cache entry for that file */
+  stat_default_file(&st);
+  st.st_mode = mode;
+  attr_cache_add(path, &st, NULL, NULL);
+  
+  /* add it to its directory in the cache */
+  /* FIXME: It won't appear in the upstream directory until the next flush,
+     might cause inconsistencies. */
+  char *p = strdup(path);
+  char *bn = basename(p);
+  char *dn = dirname(p);
+  dir_t *dir = dir_cache_find(dn);
+  if (dir)
+    dir_cache_add(dir, bn, 0);
+  free(p);
+  
+  return 0;
+}
+
 static void *obsfs_init(struct fuse_conn_info *conn)
 {
   /* change to the file cache directory; that way we don't have to remember it elsewhere */
@@ -805,6 +834,7 @@ static struct fuse_operations obsfs_oper = {
   .open = obsfs_open,
   .flush = obsfs_flush,
   .truncate = obsfs_truncate,
+  .create = obsfs_create,
   .read = obsfs_read,
   .write = obsfs_write,
   .readlink = obsfs_readlink,
