@@ -751,16 +751,22 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
     sprintf(url, "%s%s", url_prefix, path);
     lseek(fi->fh, 0, SEEK_SET);
     fp = fdopen(dup(fi->fh), "r");
+    if (!fp) {
+      perror("fdopen");
+      return -errno;
+    }
     CURL *curl = curl_open_file(url, fread, NULL, fp);
     curl_easy_setopt(curl, CURLOPT_UPLOAD, 1);
     struct stat st;
     fstat(fi->fh, &st);
     curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, st.st_size);
     if ((ret = curl_easy_perform(curl))) {
+      fclose(fp);
       fprintf(stderr,"curl error %d\n", ret);
       return -1;
     }
     curl_easy_cleanup(curl);
+    fclose(fp);
     at->modified = 0;
   }
   return 0;
