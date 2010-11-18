@@ -7,6 +7,7 @@ typedef struct {
   char *symlink;
   char *hardlink;
   time_t timestamp;
+  int modified;
   UT_hash_handle hh;
 } attr_t;
 

@@ -71,7 +71,7 @@ attr_t *attr_cache_find(const char *path)
   HASH_FIND_STR(attr_hash, path, h);
   if (h) {
     DEBUG("ATTR CACHE: found hash entry for %s\n", path);
-    if (time(NULL) - h->timestamp > ATTR_CACHE_TIMEOUT) {
+    if (time(NULL) - h->timestamp > ATTR_CACHE_TIMEOUT && !h->modified) {
       DEBUG("ATTR CACHE: timeout for entry %s, deleting\n", path);
       HASH_DEL(attr_hash, h);
       free_attr(h);

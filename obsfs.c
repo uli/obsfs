@@ -356,13 +356,17 @@ static size_t write_adapter(void *ptr, size_t size, size_t nmemb, void *userdata
 }
 
 /* initialize curl and set API user name and password, writer function and user data */
-static CURL *curl_open_file(const char *url, void *write_fun, void *user_data)
+static CURL *curl_open_file(const char *url, void * read_fun, void *write_fun, void *user_data)
 {
   CURL *curl = curl_easy_init();
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_USERNAME, options.api_username);
   curl_easy_setopt(curl, CURLOPT_PASSWORD, options.api_password);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_fun);
+  if (read_fun)
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_fun);
+  if (write_fun)
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_fun);
+  curl_easy_setopt(curl, CURLOPT_READDATA, user_data);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, user_data);
   return curl;
 }
@@ -415,7 +419,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   sprintf(urlbuf, "%s%s", url_prefix, api_path);
   
   /* open the URL and set up CURL options */
-  curl = curl_open_file(urlbuf, write_adapter, xp);
+  curl = curl_open_file(urlbuf, NULL, write_adapter, xp);
   //DEBUG("username %s pw %s\n", options.api_username, options.api_password);
   
   /* perform the actual retrieval; this will instruct curl to get the data from
@@ -659,7 +663,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
     sprintf(urlbuf, "%s%s", url_prefix, effective_path);
     
     /* retrieve the file from the API server */
-    curl = curl_open_file(urlbuf, fwrite, fp);
+    curl = curl_open_file(urlbuf, NULL, fwrite, fp);
     if ((ret = curl_easy_perform(curl))) {
       fprintf(stderr,"curl error %d\n", ret);
     }
@@ -705,6 +709,53 @@ static int obsfs_read(const char *path, char *buf, size_t size, off_t offset,
   return pread(fi->fh, buf, size, offset);
 }
 
+static int obsfs_write(const char *path, const char *buf, size_t size, off_t offset,
+                       struct fuse_file_info *fi)
+{
+  attr_t *at = attr_cache_find(path);
+  if (!at) {
+    DEBUG("WRITE: internal error writing to %s\n", path);
+    return -1;
+  }
+  at->modified = 1;
+  return pwrite(fi->fh, buf, size, offset);
+}
+
+static int obsfs_truncate(const char *path, off_t offset)
+{
+  return truncate(path + 1, offset);
+}
+
+static int obsfs_flush(const char *path, struct fuse_file_info *fi)
+{
+  int ret;
+  FILE *fp;
+  DEBUG("FLUSH: flushing %s\n", path);
+  attr_t *at = attr_cache_find(path);
+  if (!at) {
+    DEBUG("FLUSH: internal error flushing %s\n", path);
+    return -1;
+  }
+  if (at->modified) {
+    char *url = malloc(strlen(url_prefix) + strlen(path) + 1);
+    sprintf(url, "%s%s", url_prefix, path);
+    lseek(fi->fh, 0, SEEK_SET);
+    fp = fdopen(dup(fi->fh), "r");
+    CURL *curl = curl_open_file(url, fread, NULL, fp);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1);
+    struct stat st;
+    fstat(fi->fh, &st);
+    curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, st.st_size);
+    if ((ret = curl_easy_perform(curl))) {
+      fprintf(stderr,"curl error %d\n", ret);
+      return -1;
+    }
+    curl_easy_cleanup(curl);
+    at->modified = 0;
+  }
+  return 0;
+}
+
 static void *obsfs_init(struct fuse_conn_info *conn)
 {
   /* change to the file cache directory; that way we don't have to remember it elsewhere */
@@ -736,7 +787,10 @@ static struct fuse_operations obsfs_oper = {
   .getattr = obsfs_getattr,
   .readdir = obsfs_readdir,
   .open = obsfs_open,
+  .flush = obsfs_flush,
+  .truncate = obsfs_truncate,
   .read = obsfs_read,
+  .write = obsfs_write,
   .readlink = obsfs_readlink,
 };
 
