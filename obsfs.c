@@ -467,8 +467,10 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
   }
   
   /* see if we have this directory cached already */
-  cached_dirents_size = dir_cache_find(&cached_dirents, path);
-  if (cached_dirents_size != -1) {
+  dir_t *dir = dir_cache_find(path);
+  if (dir) {
+    cached_dirents = dir->entries;
+    cached_dirents_size = dir->num_entries;
     /* cache hit */
     int i;
     struct stat st;

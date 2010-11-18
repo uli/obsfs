@@ -36,5 +36,5 @@ void attr_cache_free(void);
 void dir_cache_init(void);
 dir_t *dir_cache_new(const char *path);
 void dir_cache_add(dir_t *dir, const char *name, int is_dir);
-int dir_cache_find(dirent_t **dir, const char *path);
+dir_t *dir_cache_find(const char *path);
 void dir_cache_free(void);

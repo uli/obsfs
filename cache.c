@@ -151,13 +151,13 @@ void dir_cache_add(dir_t *dir, const char *name, int is_dir)
 }
 
 /* retrieve a directory cache entry */
-int dir_cache_find(dirent_t **dir, const char *path)
+dir_t *dir_cache_find(const char *path)
 {
   dir_t *d;
   HASH_FIND_STR(dir_hash, path, d);
   if (!d) {
     DEBUG("DIR CACHE: no entry found for %s\n", path);
-    return -1;
+    return NULL;
   }
   else {
     DEBUG("DIR CACHE: found entry for %s\n", path);
@@ -165,10 +165,9 @@ int dir_cache_find(dirent_t **dir, const char *path)
       DEBUG("DIR CACHE: timeout for entry %s, deleting\n", path);
       HASH_DEL(dir_hash, d);
       free_dir(d);
-      return -1;
+      return NULL;
     }
-    *dir = d->entries;
-    return d->num_entries;
+    return d;
   }
 }
 
