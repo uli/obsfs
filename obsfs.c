@@ -726,6 +726,8 @@ static int obsfs_write(const char *path, const char *buf, size_t size, off_t off
     return -1;
   }
   at->modified = 1;
+  if (offset + size > at->st.st_size)
+    at->st.st_size = offset + size;
   return pwrite(fi->fh, buf, size, offset);
 }
 
