@@ -741,25 +741,41 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
   int ret;
   FILE *fp;
   DEBUG("FLUSH: flushing %s\n", path);
+  
+  /* If the file is being flushed, we have seen it before, so it's in the attr cache. */
+  /* FIXME: What if it has expired there? */
   attr_t *at = attr_cache_find(path);
   if (!at) {
     DEBUG("FLUSH: internal error flushing %s\n", path);
     return -1;
   }
+  
+  /* If it has been modified, we need to write it back to the API server. */
   if (at->modified) {
+    /* where to PUT it */
     char *url = malloc(strlen(url_prefix) + strlen(path) + 1);
     sprintf(url, "%s%s", url_prefix, path);
-    lseek(fi->fh, 0, SEEK_SET);
+    
+    if (lseek(fi->fh, 0, SEEK_SET) < 0)
+      return -errno;
+      
+    /* curl likes fread(), so we get us a FILE pointer */
     fp = fdopen(dup(fi->fh), "r");
     if (!fp) {
       perror("fdopen");
       return -errno;
     }
+    
+    /* prepare for uploading the file */
     CURL *curl = curl_open_file(url, fread, NULL, fp);
     curl_easy_setopt(curl, CURLOPT_UPLOAD, 1);
+    
+    /* need to tell curl about the file size */
     struct stat st;
     fstat(fi->fh, &st);
     curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, st.st_size);
+    
+    /* do it! */
     if ((ret = curl_easy_perform(curl))) {
       fclose(fp);
       fprintf(stderr,"curl error %d\n", ret);
@@ -767,6 +783,7 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
     }
     curl_easy_cleanup(curl);
     fclose(fp);
+    
     at->modified = 0;
   }
   return 0;
