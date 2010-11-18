@@ -63,6 +63,8 @@ static struct fuse_opt obsfs_opts[] =
 static void stat_make_file(struct stat *st)
 {
   st->st_mode = S_IFREG | 0644;
+  st->st_uid = getuid();
+  st->st_gid = getgid();
   st->st_nlink = 1;
 }
 
@@ -75,6 +77,8 @@ static void stat_default_file(struct stat *st)
 static void stat_make_dir(struct stat *st)
 {
   st->st_mode = S_IFDIR | 0755;
+  st->st_uid = getuid();
+  st->st_gid = getgid();
   st->st_nlink = 2;
 }
 
