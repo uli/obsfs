@@ -12,7 +12,6 @@
 
 #include <curl/curl.h>
 #include <expat.h>
-#include <libgen.h>
 #include <unistd.h>
 
 #include "obsfs.h"
@@ -133,10 +132,10 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
          without giving it a filler function, so it will only cache
          the entries it finds in the attribute cache, where we can
          subsequently retrieve the one we're looking for. */
-      char *dir = strdup(path);	/* dirname modifies its argument, need to copy */
+      char *dir = dirname_c(path, NULL);
       DEBUG("not found, trying to get directory\n");
       /* call with buf and filler NULL for cache-only operation */
-      obsfs_readdir(dirname(dir), NULL, NULL, 0, NULL);
+      obsfs_readdir(dir, NULL, NULL, 0, NULL);
       free(dir);
       /* now the attributes are in the attr cache (if it exists at all) */
       ret = attr_cache_find(path);
@@ -165,10 +164,10 @@ found:
     buf[buflen-1] = 0;
     return 0;
   }
-  char *dir = strdup(path);	/* dirname modifies its argument, need to copy */
+  char *dir = dirname_c(path, NULL);
   DEBUG("link not found, trying to get directory\n");
   /* call with buf and filler NULL for cache-only operation */
-  obsfs_readdir(dirname(dir), NULL, NULL, 0, NULL);
+  obsfs_readdir(dir, NULL, NULL, 0, NULL);
   free(dir);
   /* now the attributes are in the attr cache (if it exists at all) */
   ret = attr_cache_find(path);
@@ -807,13 +806,13 @@ static int obsfs_create(const char *path, mode_t mode, struct fuse_file_info *fi
   /* add it to its directory in the cache */
   /* FIXME: It won't appear in the upstream directory until the next flush,
      might cause inconsistencies. */
-  char *p = strdup(path);
-  char *bn = basename(p);
-  char *dn = dirname(p);
+  char *bn, *dn;
+  dn = dirname_c(path, &bn);
   dir_t *dir = dir_cache_find(dn);
-  if (dir)
+  if (dir) {
     dir_cache_add(dir, bn, 0);
-  free(p);
+  }
+  free(dn);
   
   return 0;
 }

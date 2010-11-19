@@ -31,3 +31,11 @@ error:
   free(dname);
   return -1;
 }
+
+char *dirname_c(const char *path, char **basenm)
+{
+  char *p = strdup(path);
+  if (basenm)
+    *basenm = basename(p);
+  return dirname(p);
+}

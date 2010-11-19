@@ -10,4 +10,5 @@ obsfs: $(OBJS)
 clean:
 	rm -f $(OBJS) obsfs
 
-obsfs.o cache.o: cache.h obsfs.h
+obsfs.o cache.o: cache.h obsfs.h util.h
+util.o: util.h
