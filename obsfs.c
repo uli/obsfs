@@ -249,7 +249,10 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
 
 static int endswith(const char *str, const char *end)
 {
-  return !strcmp(str + strlen(str) - strlen(end), end);
+  if (strlen(str) < strlen(end))
+    return 0;
+  else
+    return !strcmp(str + strlen(str) - strlen(end), end);
 }
 
 /* expat tag start callback for reading API directories */
