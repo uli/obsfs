@@ -171,7 +171,8 @@ dir_t *dir_cache_find(const char *path)
   }
   else {
     DEBUG("DIR CACHE: found entry for %s\n", path);
-    if (time(NULL) - d->timestamp > DIR_CACHE_TIMEOUT && !d->modified) {
+    if ((time(NULL) - d->timestamp) > (DIR_CACHE_TIMEOUT + d->num_entries / 10)
+        && !d->modified) {
       DEBUG("DIR CACHE: timeout for entry %s, deleting\n", path);
       HASH_DEL(dir_hash, d);
       free_dir(d);

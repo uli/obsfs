@@ -5,5 +5,5 @@
    up to begin with...  It therefore makes sense to have a much larger
    timeout for the attribute cache, which reduces server load. */
 
-#define DIR_CACHE_TIMEOUT 60
+#define DIR_CACHE_TIMEOUT 20
 #define ATTR_CACHE_TIMEOUT 3600
