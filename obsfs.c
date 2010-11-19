@@ -709,7 +709,11 @@ static int obsfs_read(const char *path, char *buf, size_t size, off_t offset,
   }
   
   /* read from the cache file */
-  return pread(fi->fh, buf, size, offset);
+  int ret = pread(fi->fh, buf, size, offset);
+  if (ret < 0)
+    return -errno;
+  else
+    return ret;
 }
 
 static int obsfs_write(const char *path, const char *buf, size_t size, off_t offset,
