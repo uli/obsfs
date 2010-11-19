@@ -919,6 +919,10 @@ int main(int argc, char *argv[])
 
   /* parse filesystem options */
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+  args.argv[args.argc++] = "-o";
+  args.argv[args.argc++] = "attr_timeout=0";
+  args.argv[args.argc] = NULL;
+  
   memset(&options, 0, sizeof(struct options));
   if (fuse_opt_parse(&args, &options, obsfs_opts, NULL) == -1)
     return -1;
