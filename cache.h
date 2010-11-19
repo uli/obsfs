@@ -23,6 +23,7 @@ typedef struct {
   dirent_t *entries;
   int num_entries;
   time_t timestamp;
+  int modified;
   UT_hash_handle hh;
 } dir_t;
 

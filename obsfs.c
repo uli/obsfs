@@ -722,7 +722,15 @@ static int obsfs_write(const char *path, const char *buf, size_t size, off_t off
     DEBUG("WRITE: internal error writing to %s\n", path);
     return -1;
   }
-  at->modified = 1;
+  if (!at->modified) {
+    at->modified = 1;
+    char *dn = dirname_c(path, NULL);
+    dir_t *dir = dir_cache_find(dn);
+    free(dn);
+    if (dir) {
+      dir->modified++;
+    }
+  }
   if (offset + size > at->st.st_size)
     at->st.st_size = offset + size;
   return pwrite(fi->fh, buf, size, offset);
@@ -782,6 +790,12 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
     fclose(fp);
     
     at->modified = 0;
+    char *dn = dirname_c(path, NULL);
+    dir_t *dir = dir_cache_find(dn);
+    free(dn);
+    if (dir) {
+      dir->modified--;
+    }
   }
   return 0;
 }
@@ -809,6 +823,10 @@ static int obsfs_create(const char *path, mode_t mode, struct fuse_file_info *fi
   dir_t *dir = dir_cache_find(dn);
   if (dir) {
     dir_cache_add(dir, bn, 0);
+    /* FIXME: We should increment dir->modified here, but we can't because
+       we don't set the modified flag in the newly created attribute so as
+       not to sync an empty file needlessly, so dir->modified would never be
+       reset...  */
   }
   free(dn);
   
