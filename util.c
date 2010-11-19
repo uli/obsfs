@@ -12,8 +12,10 @@ int mkdirp(const char *pathname, mode_t mode)
   char *dname = dirname(strdup(pathname));
   fprintf(stderr, "MKDIRP trying to create directory %s\n", dname);
   if (mkdir(dname, mode)) {
-    if (errno == EEXIST)
+    if (errno == EEXIST) {
+      free(dname);
       return 0;
+    }
     else if (errno == ENOENT) {
       if (mkdirp(dname, mode)) {
         goto error;

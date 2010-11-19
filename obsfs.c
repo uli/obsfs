@@ -912,6 +912,7 @@ static void compile_regexes(void)
 
 static void free_regexes(void)
 {
+  regfree(&build_project);
   regfree(&build_project_failed);
   regfree(&build_project_failed_foo);
   regfree(&build_project_failed_foo_bar);
