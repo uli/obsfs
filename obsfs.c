@@ -13,6 +13,7 @@
 #include <curl/curl.h>
 #include <expat.h>
 #include <unistd.h>
+#include <regex.h>
 
 #include "obsfs.h"
 #include "cache.h"
@@ -35,6 +36,14 @@ const char *root_dir[] = {
   "/request",
   NULL
 };
+
+regex_t build_project;
+regex_t build_project_failed;
+regex_t build_project_failed_foo;
+regex_t build_project_failed_foo_bar;
+regex_t build_project_repo_arch;
+regex_t build_project_repo_arch_foo;
+regex_t build_project_repo_arch_failed;
 
 char *file_cache_dir = NULL;	/* directory to keep cached file contents in */
 int file_cache_count = 1;	/* used to make up names for cached files */
@@ -377,18 +386,6 @@ static CURL *curl_open_file(const char *url, void * read_fun, void *write_fun, v
   return curl;
 }
 
-/* find the depth of a path (used to determine whether it's necessary
-   to add additional "fixed" nodes such as _log, _status etc. */
-static int path_depth(const char *path)
-{
-  int count = 0;
-  for (path++ /* skip first slash */; *path; path++) {
-    if (*path == '/')
-      count++;
-  }
-  return count;
-}
-
 static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *fs_path, const char *api_path,
                       const char *mangled_path, const char *filter_attr, const char *filter_value, const char *relink)
 {
@@ -463,6 +460,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
   dirent_t *cached_dirents;
   int cached_dirents_size;
   int mangled_path = 0;
+  regmatch_t matches[10];
   
   if (filler) {
     filler(buf, ".", NULL, 0);
@@ -504,41 +502,35 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
        an overview of failing packages using, for instance, find. */
     if ((fpath = strstr(canon_path, "/_failed"))) {
       char *opath = canon_path;		/* original path requested */
-      switch (path_depth(path)) {
-      case 2:
-      case 3:
-        /* build/<project>/_failed and build/<project>/_failed/<foo> are
-           equivalent to build/<project> and build/<project>/<foo>, respectively */
-        canon_path = strstripcpy(opath, "/_failed");	/* remove the "/_failed" */
-        free(opath);
-        mangled_path = 1;	/* remember that we messed with the path so we don't add
-                                   another "_failed" entry to this directory */
-        break;
-      case 4:
+      if (!regexec(&build_project_failed_foo_bar, canon_path, 0, matches, 0)) {
         /* build/<project>/_failed/<foo>/<bar> is equivalent to
            build/<project>/<foo>/<bar>/_failed */
         canon_path = strstripcpy(opath, "/_failed");	/* remove "/_failed" */
         free(opath);
         strcat(canon_path, "/_failed");		/* ...and add it again at the end */
         mangled_path = 1;
-        break;
-      default:
-        break;
+      }
+      else if (!regexec(&build_project_failed_foo, canon_path, 0, matches, 0) ||
+          !regexec(&build_project_failed, canon_path, 5, matches, 0)) {
+        /* build/<project>/_failed and build/<project>/_failed/<foo> are
+           equivalent to build/<project> and build/<project>/<foo>, respectively */
+        canon_path = strstripcpy(opath, "/_failed");	/* remove the "/_failed" */
+        free(opath);
+        mangled_path = 1;	/* remember that we messed with the path so we don't add
+                                   another "_failed" entry to this directory */
       }
     }
-    char *bpath = strdup(canon_path);	/* copy used for strtok_r() dissection */
     /* Is this the (canonical) "_failed" directory? */
-    if (!strncmp("/build", canon_path, 6)	/* in the /build tree? */
-        && path_depth(canon_path) == 4		/* below <arch> directory? */
-        && !strcmp(basename(bpath), "_failed")	/* basename "_failed"? */
-       ) {
-
+    if (!regexec(&build_project_repo_arch_failed, canon_path, 10, matches, 0)) {
       /* dissect path to find project, repo, and architecture */
-      char *strtokp;
-      strtok_r(bpath, "/", &strtokp); /* skip "build" */
-      const char *project = strtok_r(NULL, "/", &strtokp);
-      const char *repo = strtok_r(NULL, "/", &strtokp);
-      const char *arch = strtok_r(NULL, "/", &strtokp);
+      int i;
+      for (i = 0; matches[i].rm_so != -1; i++) {
+        DEBUG("REGEX match %d to %d\n", matches[i].rm_so, matches[i].rm_eo);
+      }
+      char *project = get_match(matches[1], canon_path);
+      char *repo = get_match(matches[2], canon_path);
+      char *arch = get_match(matches[3], canon_path);
+      DEBUG("REGEX project %s repo %s arch %s\n", project, repo, arch);
 
       /* construct the API server path for "failed" results */
       char *respath = malloc(strlen(project) + strlen(repo) + strlen(arch) + 100 /* too lazy to count right now */);
@@ -547,35 +539,35 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       /* parse only those entries that have attribute "code" with value "failed" */
       parse_dir(buf, filler, newdir, path, respath, canon_path, "code", "failed", NULL);
       free(respath);
+      free(project);
+      free(repo);
+      free(arch);
     }
     else {
       /* regular directory, no special handling */
       parse_dir(buf, filler, newdir, path, canon_path, canon_path, NULL, NULL, NULL);
     }
-    free(bpath);
     free(canon_path);
     
     /* check if we need to add additional nodes */
     /* Most of the available API is not exposed through directories. We have to know
        about it and add them ourselves at the appropriate places. */
-    DEBUG("path depth of %s is %d\n", path, path_depth(path));
     
     /* special entries for /build tree */
     if (!mangled_path			/* no additional nodes if we have messed with the path */
         && !strncmp("/build", path, 6)
        ) {
       /* "_failed" directories */
-      if (path_depth(path) == 3 || path_depth(path) == 1) {
-        /* build/<project>/<repo>/<arch>/_failed and build/_failed */
+      if (!regexec(&build_project_repo_arch, path, 0, matches, 0) ||
+          !regexec(&build_project, path, 0, matches, 0)) {
+        /* build/<project>/<repo>/<arch>/_failed and build/<project>/_failed */
         struct stat st;
         stat_default_dir(&st);
         add_dir_node(buf, filler, newdir, path, "_failed", &st, NULL, NULL);
       }
       /* log, history, status, and reason for packages */
-      char *fpath = strdup(path);
-      if (path_depth(path) == 4			/* build/.../.../.../... */
-          && strcmp(basename(fpath), "_failed") /* but not build/.../.../.../_failed */
-         ) {
+      if (regexec(&build_project_repo_arch_failed, path, 0, matches, 0)
+          && !regexec(&build_project_repo_arch_foo, path, 0, matches, 0)) {
         int i;
         struct stat st;
 
@@ -592,7 +584,6 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
           add_dir_node(buf, filler, newdir, path, status_api[i], &st, NULL, NULL);
         }
       }
-      free(fpath);
     }
   }
   return 0;
@@ -901,6 +892,27 @@ static void obsfs_destroy(void *foo)
   free(url_prefix);
 }
 
+static void compile_regexes(void)
+{
+  regcomp(&build_project, "/build/[^/]*$", 0);
+  regcomp(&build_project_failed, "/build/[^/]*/_failed", 0);
+  regcomp(&build_project_failed_foo, "/build/[^/]*/_failed/[^/]*", 0);
+  regcomp(&build_project_failed_foo_bar, "/build/[^/]*/_failed/[^/]*/[^/]*", 0);
+  regcomp(&build_project_repo_arch, "/build/[^/]*/[^/]*/[^/]*$", 0);
+  regcomp(&build_project_repo_arch_foo, "/build/[^/]*/[^/]*/[^/]*/[^/]*$", 0);
+  regcomp(&build_project_repo_arch_failed, "/build/\\([^/]*\\)/\\([^/]*\\)/\\([^/]*\\)/_failed", 0);
+}
+
+static void free_regexes(void)
+{
+  regfree(&build_project_failed);
+  regfree(&build_project_failed_foo);
+  regfree(&build_project_failed_foo_bar);
+  regfree(&build_project_repo_arch);
+  regfree(&build_project_repo_arch_foo);
+  regfree(&build_project_repo_arch_failed);
+}
+
 static struct fuse_operations obsfs_oper = {
   .init = obsfs_init,
   .destroy = obsfs_destroy,
@@ -950,8 +962,12 @@ int main(int argc, char *argv[])
   /* can't do the chdir() here because we might have a relative
      mount point specified; will do it in obsfs_init() */
 
+  compile_regexes();
+  
   /* Go! */
   ret = fuse_main(args.argc, args.argv, &obsfs_oper, NULL);
+  
+  free_regexes();
   
   /* remove the file cache */
   if (!chdir(file_cache_dir)) {

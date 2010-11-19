@@ -46,3 +46,13 @@ char *make_url(const char *url_prefix, const char *path)
   sprintf(urlbuf, "%s%s", url_prefix, path);
   return urlbuf;
 }
+
+char *get_match(regmatch_t match, const char *str)
+{
+  int len = match.rm_eo - match.rm_so;
+  char *p = malloc(len + 1);
+  memcpy(p, str + match.rm_so, len);
+  p[len] = 0;
+  return p;
+}
+
