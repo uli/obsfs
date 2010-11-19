@@ -418,8 +418,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   XML_SetElementHandler(xp, expat_api_dir_start, expat_api_dir_end);
   
   /* construct the full API URL for this directory */
-  urlbuf = malloc(strlen(url_prefix) + strlen(api_path) + 1);
-  sprintf(urlbuf, "%s%s", url_prefix, api_path);
+  urlbuf = make_url(url_prefix, api_path);
   
   /* open the URL and set up CURL options */
   curl = curl_open_file(urlbuf, NULL, write_adapter, xp);
@@ -664,8 +663,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
     }
 
     /* compose the full URL */
-    urlbuf = malloc(strlen(url_prefix) + strlen(effective_path) + 1);
-    sprintf(urlbuf, "%s%s", url_prefix, effective_path);
+    urlbuf = make_url(url_prefix, effective_path);
     
     /* retrieve the file from the API server */
     curl = curl_open_file(urlbuf, NULL, fwrite, fp);
@@ -758,8 +756,7 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
   /* If it has been modified, we need to write it back to the API server. */
   if (at->modified) {
     /* where to PUT it */
-    char *url = malloc(strlen(url_prefix) + strlen(path) + 1);
-    sprintf(url, "%s%s", url_prefix, path);
+    char *url = make_url(url_prefix, path);
     
     if (lseek(fi->fh, 0, SEEK_SET) < 0)
       return -errno;
@@ -857,8 +854,7 @@ static int obsfs_unlink(const char *path)
   rerrno = errno;
   
   /* remove node from server */
-  char *url = malloc(strlen(url_prefix) + strlen(path) + 1);
-  sprintf(url, "%s%s", url_prefix, path);
+  char *url = make_url(url_prefix, path);
   CURL *curl = curl_open_file(url, NULL, write_null, NULL);
   curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
   

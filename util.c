@@ -39,3 +39,10 @@ char *dirname_c(const char *path, char **basenm)
     *basenm = basename(p);
   return dirname(p);
 }
+
+char *make_url(const char *url_prefix, const char *path)
+{
+  char *urlbuf = malloc(strlen(url_prefix) + strlen(path) + 1);
+  sprintf(urlbuf, "%s%s", url_prefix, path);
+  return urlbuf;
+}
