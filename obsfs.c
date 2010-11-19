@@ -289,6 +289,9 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         /* an entry with a size is always a regular file */
         stat_make_file(&st);
       }
+      else if (!strcmp(atts[0], "mtime")) {
+        st.st_mtime = atoi(atts[1]);
+      }
       atts += 2; /* expat hands us a string array with name/value pairs */
     }
     if (filename) {
