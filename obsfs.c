@@ -922,6 +922,9 @@ int main(int argc, char *argv[])
 
   /* parse filesystem options */
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+  
+  /* Caching attributes is not a good idea because they may change unbeknownst
+     to FUSE, so we tell it not to. */
   args.argv[args.argc++] = "-o";
   args.argv[args.argc++] = "attr_timeout=0";
   args.argv[args.argc] = NULL;
