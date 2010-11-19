@@ -664,11 +664,11 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
     
     /* retrieve the file from the API server */
     curl = curl_open_file(urlbuf, NULL, fwrite, fp);
-    if ((ret = curl_easy_perform(curl))) {
+    ret = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    if (ret) {
       fprintf(stderr,"curl error %d\n", ret);
     }
-    curl_easy_cleanup(curl);
-    
     free(urlbuf);
   }
   
@@ -779,13 +779,13 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
     curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, st.st_size);
     
     /* do it! */
-    if ((ret = curl_easy_perform(curl))) {
-      fclose(fp);
+    ret = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    fclose(fp);
+    if (ret) {
       fprintf(stderr,"curl error %d\n", ret);
       return -1;
     }
-    curl_easy_cleanup(curl);
-    fclose(fp);
     
     at->modified = 0;
     char *dn = dirname_c(path, NULL);
@@ -859,12 +859,16 @@ static int obsfs_unlink(const char *path)
   CURL *curl = curl_open_file(url, NULL, write_null, NULL);
   curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
   
-  if ((cret = curl_easy_perform(curl))) {
+  cret = curl_easy_perform(curl);
+  curl_easy_cleanup(curl);
+  if (cret) {
     DEBUG("UNLINK: curl error %d\n", cret);
     if (ret) {
       /* both unlink() in the cache and DELETE on the server failed */
       return -rerrno;
     }
+    else
+      return 0;
   }
   /* if either unlink() or DELETE on the server worked OK, we're fine */
   return 0;
@@ -984,6 +988,8 @@ int main(int argc, char *argv[])
   fuse_opt_free_args(&args);
   attr_cache_free();
   dir_cache_free();
+  
+  curl_global_cleanup();
   
   return ret;
 }
