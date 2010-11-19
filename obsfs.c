@@ -365,10 +365,8 @@ static CURL *curl_open_file(const char *url, void * read_fun, void *write_fun, v
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_USERNAME, options.api_username);
   curl_easy_setopt(curl, CURLOPT_PASSWORD, options.api_password);
-  if (read_fun)
-    curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_fun);
-  if (write_fun)
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_fun);
+  curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_fun);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_fun);
   curl_easy_setopt(curl, CURLOPT_READDATA, user_data);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, user_data);
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "cookies"); /* start cookie engine */
