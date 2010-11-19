@@ -833,6 +833,46 @@ static int obsfs_create(const char *path, mode_t mode, struct fuse_file_info *fi
   return 0;
 }
 
+/* Giving it a NULL pointer as the reader function doesn't deter curl from
+   using fwrite() anyway, so we need this expceptionally useless function. */
+static size_t write_null(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+  (void)ptr;
+  (void)userdata;
+  return size * nmemb;
+}
+
+static int obsfs_unlink(const char *path)
+{
+  int ret, cret;
+  int rerrno;		/* errno set by unlink() */
+  DEBUG("UNLINK %s\n", path);
+  
+  /* remove node from the attribute and directory caches */
+  attr_cache_remove(path);
+  dir_cache_remove(path);
+  
+  /* remove node from file cache */
+  ret = unlink(path + 1);
+  rerrno = errno;
+  
+  /* remove node from server */
+  char *url = malloc(strlen(url_prefix) + strlen(path) + 1);
+  sprintf(url, "%s%s", url_prefix, path);
+  CURL *curl = curl_open_file(url, NULL, write_null, NULL);
+  curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+  
+  if ((cret = curl_easy_perform(curl))) {
+    DEBUG("UNLINK: curl error %d\n", cret);
+    if (ret) {
+      /* both unlink() in the cache and DELETE on the server failed */
+      return -rerrno;
+    }
+  }
+  /* if either unlink() or DELETE on the server worked OK, we're fine */
+  return 0;
+}
+
 static void *obsfs_init(struct fuse_conn_info *conn)
 {
   /* change to the file cache directory; that way we don't have to remember it elsewhere */
@@ -870,6 +910,7 @@ static struct fuse_operations obsfs_oper = {
   .read = obsfs_read,
   .write = obsfs_write,
   .readlink = obsfs_readlink,
+  .unlink = obsfs_unlink,
 };
 
 int main(int argc, char *argv[])

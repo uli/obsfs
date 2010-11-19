@@ -32,10 +32,12 @@ void attr_cache_init(void);
 void attr_cache_add(const char *path, struct stat *st, const char *symlink, const char *hardlink);
 attr_t *attr_cache_find(const char *path);
 void attr_cache_free(void);
+void attr_cache_remove(const char *path);
 
 /* directory cache methods */
 void dir_cache_init(void);
 dir_t *dir_cache_new(const char *path);
 void dir_cache_add(dir_t *dir, const char *name, int is_dir);
+void dir_cache_remove(const char *path);
 dir_t *dir_cache_find(const char *path);
 void dir_cache_free(void);

@@ -1,5 +1,6 @@
 #include "obsfs.h"
 #include "cache.h"
+#include "util.h"
 
 #define CACHE_DEBUG
 
@@ -92,6 +93,15 @@ void attr_cache_free(void)
   }
 }
 
+void attr_cache_remove(const char *path)
+{
+  attr_t *h = attr_cache_find(path);
+  if (h) {
+    HASH_DEL(attr_hash, h);
+    free_attr(h);
+  }
+}
+
 /* clear directory cache */
 void dir_cache_init(void)
 {
@@ -168,6 +178,27 @@ dir_t *dir_cache_find(const char *path)
       return NULL;
     }
     return d;
+  }
+}
+
+void dir_cache_remove(const char *path)
+{
+  char *bn, *dn;
+  dn = dirname_c(path, &bn);
+  dir_t *d = dir_cache_find(dn);
+  free(dn);
+  if (d) {
+    int i, j;
+    for (i = 0; i < d->num_entries; i++) {
+      if (!strcmp(d->entries[i].name, bn)) {
+        free(d->entries[i].name);
+        for (j = i + 1; j < d->num_entries; j++) {
+          d->entries[j - 1] = d->entries[j];
+        }
+        d->num_entries--;
+        return;
+      }
+    }
   }
 }
 
