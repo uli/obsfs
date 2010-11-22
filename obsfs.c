@@ -168,7 +168,7 @@ static int obsfs_readlink(const char *path, char *buf, size_t buflen)
   if (ret) {
 found:
     if (!ret->symlink)
-      return -1;
+      return -ENOENT;
     strncpy(buf, ret->symlink, buflen - 1);
     buf[buflen-1] = 0;
     return 0;
@@ -182,7 +182,7 @@ found:
   ret = attr_cache_find(path);
   if (ret)
    goto found;
-  return -1;
+  return -ENOENT;
 }
 
 /* data we need in the expat callbacks to save the directory entries */
@@ -645,10 +645,10 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   if (!fp) {
     /* create the cache file */
     if (mkdirp(relpath, 0755))
-      return -1;
+      return -errno;
     fp = fopen(relpath, "w+");
     if (!fp)
-      return -1;
+      return -EIO;
   
     /* find out if this file is supposed to hardlink somewhere */
     const char *effective_path = path;
@@ -719,7 +719,7 @@ static int obsfs_write(const char *path, const char *buf, size_t size, off_t off
   attr_t *at = attr_cache_find(path);
   if (!at) {
     DEBUG("WRITE: internal error writing to %s\n", path);
-    return -1;
+    return -EIO;
   }
   if (!at->modified) {
     at->modified = 1;
@@ -751,7 +751,7 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
   attr_t *at = attr_cache_find(path);
   if (!at) {
     DEBUG("FLUSH: internal error flushing %s\n", path);
-    return -1;
+    return -EIO;
   }
   
   /* If it has been modified, we need to write it back to the API server. */
@@ -784,7 +784,7 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
     fclose(fp);
     if (ret) {
       fprintf(stderr,"curl error %d\n", ret);
-      return -1;
+      return -EIO;
     }
     
     at->modified = 0;
