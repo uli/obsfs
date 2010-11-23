@@ -641,6 +641,14 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
     return 0;
   }
 
+  /* discard unmodified cached files that have expired */
+  if (!lstat(relpath, &st)) {
+    if (at && !at->modified && (time(NULL) - st.st_mtime) > FILE_CACHE_TIMEOUT) {
+      DEBUG("OPEN: expiring cached file %s\n", path);
+      unlink(relpath);
+    }
+  }
+
   fp = fopen(relpath, "r+");
   if (!fp) {
     /* create the cache file */
