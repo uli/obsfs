@@ -38,6 +38,7 @@
 #include "obsfs.h"
 #include "cache.h"
 #include "util.h"
+#include "status.h"
 
 #ifdef DEBUG_OBSFS
 #define DEBUG(x...) fprintf(stderr, x)
@@ -394,7 +395,7 @@ static size_t write_adapter(void *ptr, size_t size, size_t nmemb, void *userdata
 }
 
 /* initialize curl and set API user name and password, writer function and user data */
-static CURL *curl_open_file(const char *url, void * read_fun, void *write_fun, void *user_data)
+static CURL *curl_open_file(const char *url, void *read_fun, void *read_data, void *write_fun, void *write_data)
 {
   CURL *curl = curl_easy_init();
   curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -402,8 +403,8 @@ static CURL *curl_open_file(const char *url, void * read_fun, void *write_fun, v
   curl_easy_setopt(curl, CURLOPT_PASSWORD, options.api_password);
   curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_fun);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_fun);
-  curl_easy_setopt(curl, CURLOPT_READDATA, user_data);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, user_data);
+  curl_easy_setopt(curl, CURLOPT_READDATA, read_data);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, write_data);
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "cookies"); /* start cookie engine */
   curl_easy_setopt(curl, CURLOPT_COOKIEJAR, "cookies");
   return curl;
@@ -444,7 +445,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   urlbuf = make_url(url_prefix, api_path);
   
   /* open the URL and set up CURL options */
-  curl = curl_open_file(urlbuf, NULL, write_adapter, xp);
+  curl = curl_open_file(urlbuf, NULL, NULL, write_adapter, xp);
   //DEBUG("username %s pw %s\n", options.api_username, options.api_password);
   
   /* perform the actual retrieval; this will instruct curl to get the data from
@@ -691,7 +692,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
     urlbuf = make_url(url_prefix, effective_path);
     
     /* retrieve the file from the API server */
-    curl = curl_open_file(urlbuf, NULL, fwrite, fp);
+    curl = curl_open_file(urlbuf, NULL, NULL, fwrite, fp);
     ret = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
     if (ret) {
@@ -768,6 +769,15 @@ static int obsfs_truncate(const char *path, off_t offset)
   return truncate(path + 1, offset);
 }
 
+/* Giving it a NULL pointer as the reader function doesn't deter curl from
+   using fwrite() anyway, so we need this expceptionally useless function. */
+static size_t write_null(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+  (void)ptr;
+  (void)userdata;
+  return size * nmemb;
+}
+
 static int obsfs_flush(const char *path, struct fuse_file_info *fi)
 {
   int ret;
@@ -797,8 +807,10 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
       return -errno;
     }
     
+    status_t *status = xml_status_init();
+
     /* prepare for uploading the file */
-    CURL *curl = curl_open_file(url, fread, NULL, fp);
+    CURL *curl = curl_open_file(url, fread, fp, xml_status_write, status);
     curl_easy_setopt(curl, CURLOPT_UPLOAD, 1);
     
     /* need to tell curl about the file size */
@@ -810,9 +822,17 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
     ret = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
     fclose(fp);
+
+    int s = xml_get_status(status);
+    xml_status_destroy(status);
+    if (s) {
+      fprintf(stderr, "FLUSH: BS status %d\n", s);
+      return -s;
+    }
+    
     if (ret) {
-      fprintf(stderr,"curl error %d\n", ret);
-      return -EIO;
+      fprintf(stderr,"FLUSH: curl error %d\n", ret);
+      return -EIO; /* as the FUSE docs point out, this is most often ignored... */
     }
     
     at->modified = 0;
@@ -859,15 +879,6 @@ static int obsfs_create(const char *path, mode_t mode, struct fuse_file_info *fi
   return 0;
 }
 
-/* Giving it a NULL pointer as the reader function doesn't deter curl from
-   using fwrite() anyway, so we need this expceptionally useless function. */
-static size_t write_null(void *ptr, size_t size, size_t nmemb, void *userdata)
-{
-  (void)ptr;
-  (void)userdata;
-  return size * nmemb;
-}
-
 static int obsfs_unlink(const char *path)
 {
   int ret, cret;
@@ -884,7 +895,7 @@ static int obsfs_unlink(const char *path)
   
   /* remove node from server */
   char *url = make_url(url_prefix, path);
-  CURL *curl = curl_open_file(url, NULL, write_null, NULL);
+  CURL *curl = curl_open_file(url, NULL, NULL, write_null, NULL);
   curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
   
   cret = curl_easy_perform(curl);
