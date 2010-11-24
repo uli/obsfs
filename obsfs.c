@@ -846,6 +846,11 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
   return 0;
 }
 
+static int obsfs_release(const char *path, struct fuse_file_info *fi)
+{
+  return close(fi->fh);
+}
+
 static int obsfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
   struct stat st;
@@ -967,6 +972,7 @@ static struct fuse_operations obsfs_oper = {
   .readdir = obsfs_readdir,
   .open = obsfs_open,
   .flush = obsfs_flush,
+  .release = obsfs_release,
   .truncate = obsfs_truncate,
   .create = obsfs_create,
   .read = obsfs_read,
