@@ -702,7 +702,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   }
   
   /* create a new file handle for the cache file, we need it later to retrieve
-     the contents (it's unlinked already) */
+     the contents */
   fi->fh = dup(fileno(fp));
   fclose(fp);
 
