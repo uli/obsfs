@@ -945,10 +945,10 @@ static void obsfs_destroy(void *foo)
 
 static void compile_regexes(void)
 {
-  regcomp(&build_project, "/build/[^/]*$", 0);
-  regcomp(&build_project_failed, "/build/[^/]*/_failed", 0);
-  regcomp(&build_project_failed_foo, "/build/[^/]*/_failed/[^/]*", 0);
-  regcomp(&build_project_failed_foo_bar, "/build/[^/]*/_failed/[^/]*/[^/]*", 0);
+  regcomp(&build_project, "/build/[^/_][^/]*$", 0);
+  regcomp(&build_project_failed, "/build/[^/_][^/]*/_failed", 0);
+  regcomp(&build_project_failed_foo, "/build/[^/_][^/]*/_failed/[^/]*", 0);
+  regcomp(&build_project_failed_foo_bar, "/build/[^/_][^/]*/_failed/[^/]*/[^/]*", 0);
   regcomp(&build_project_repo_arch, "/build/[^/]*/[^/]*/[^/]*$", 0);
   regcomp(&build_project_repo_arch_foo, "/build/[^/]*/[^/]*/[^/]*/[^/]*$", 0);
   regcomp(&build_project_repo_arch_failed, "/build/\\([^/]*\\)/\\([^/]*\\)/\\([^/]*\\)/_failed", 0);
