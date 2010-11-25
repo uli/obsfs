@@ -103,6 +103,12 @@ static void stat_default_file(struct stat *st)
   stat_make_file(st);
 }
 
+static void stat_make_symlink(struct stat *st)
+{
+  stat_make_file(st);
+  st->st_mode = S_IFLNK | 0644;
+}
+
 static void stat_make_dir(struct stat *st)
 {
   st->st_mode = S_IFDIR | 0755;
@@ -215,6 +221,7 @@ struct filbuf {
   const char *mangled_path;	/* canonical FS path if fs_path is an alias */
   dir_t *cdir;			/* dir cache entry to fill in */
   int in_dir;			/* flag set when inside a <directory> or <binarylist> */
+  int in_collection;		/* flag set when inside a <collection> */
   const char *filter_attr;
   const char *filter_value;
   const char *relink;
@@ -285,14 +292,17 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   stat_default_file(&st);
 
   /* start of directory */
-  if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result")) {
+  if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result") || !strcmp(name, "collection")) {
     fb->in_dir = 1;
+    if (!strcmp(name, "collection"))
+      fb->in_collection = 1;
     return;
   }
   
   /* directory entry */
-  if (fb->in_dir && (!strcmp(name, "entry") || !strcmp(name, "binary"))) {
+  if (fb->in_dir && (!strcmp(name, "entry") || !strcmp(name, "binary") || !strcmp(name, "project"))) {
     const char *filename = NULL;
+    char *symlink = NULL;
     
     stat_make_dir(&st);	/* assume it's a directory until we know better */
     /* process all attributes */
@@ -302,14 +312,21 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         break;
       }
       if (!strcmp(atts[0], "name")) {
-        /* entry in a "directory" directory; we assume it is itself a directory */
         filename = atts[1];
-        /* Muddy waters:
-           - There are entries in the /published tree that don't
-             have a size, but are files anyway.
-           - Everything in /request is a file. */
-        if (endswith(filename, ".rpm") || endswith(fb->api_path, "/request"))
-          stat_make_file(&st);
+        if (fb->in_collection) {
+          stat_make_symlink(&st);
+          symlink = malloc(strlen("../") + strlen(filename) + 1);
+          sprintf(symlink, "../%s", filename);
+        }
+        else {
+          /* entry in a "directory" directory; we assume it is itself a directory */
+          /* Muddy waters:
+             - There are entries in the /published tree that don't
+               have a size, but are files anyway.
+             - Everything in /request is a file. */
+          if (endswith(filename, ".rpm") || endswith(fb->api_path, "/request"))
+            stat_make_file(&st);
+        }
       }
       else if (!strcmp(atts[0], "filename")) {
         filename = atts[1];
@@ -328,17 +345,17 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       atts += 2; /* expat hands us a string array with name/value pairs */
     }
     if (filename) {
-      char *relink_dir = NULL;
       if (fb->relink) {
         /* have this entry symlink to a file with the same name in a different directory */
-        relink_dir = malloc(strlen(fb->relink) + strlen(filename) + 1);
-        sprintf(relink_dir, fb->relink, filename);
-        //DEBUG("YYYYYYYYYY relinking to %s from %s\n", relink_dir, fb->fs_path);
+        symlink = malloc(strlen(fb->relink) + strlen(filename) + 1);
+        sprintf(symlink, fb->relink, filename);
+        //DEBUG("YYYYYYYYYY relinking to %s from %s\n", symlink, fb->fs_path);
         st.st_mode = S_IFLNK;
       }
-      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, relink_dir, NULL);
-      if (relink_dir)
-        free(relink_dir);
+      
+      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, symlink, NULL);
+      if (symlink)
+        free(symlink);
     }
   }
   
@@ -382,8 +399,9 @@ static void expat_api_dir_end(void *ud, const XML_Char *name)
 {
   struct filbuf *fb = (struct filbuf *)ud;
   /* end of API directory */
-  if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result")) {
+  if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result") || !strcmp(name, "collection")) {
     fb->in_dir = 0;
+    fb->in_collection = 0;
   }
 }
 
@@ -567,6 +585,13 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       free(repo);
       free(arch);
     }
+    else if (!strcmp("/build/_my_projects", path) || !strcmp("/source/_my_projects", path)) {
+      const char *my_project_path_format = "/search/project_id?match=person/@userid+=+'%s'";
+      char *my_project_path = malloc(strlen(my_project_path_format) + strlen(options.api_username));
+      sprintf(my_project_path, my_project_path_format, options.api_username);
+      parse_dir(buf, filler, newdir, path, my_project_path, canon_path, NULL, NULL, NULL);
+      free(my_project_path);
+    }
     else {
       /* regular directory, no special handling */
       parse_dir(buf, filler, newdir, path, canon_path, canon_path, NULL, NULL, NULL);
@@ -608,6 +633,11 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
           add_dir_node(buf, filler, newdir, path, status_api[i], &st, NULL, NULL);
         }
       }
+    }
+    if (!strcmp("/build", path) || !strcmp("/source", path)) {
+      struct stat st;
+      stat_default_dir(&st);
+      add_dir_node(buf, filler, newdir, path, "_my_projects", &st, NULL, NULL);
     }
   }
   return 0;
