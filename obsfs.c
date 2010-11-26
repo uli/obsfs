@@ -65,6 +65,7 @@ regex_t build_project_failed_foo_bar;
 regex_t build_project_repo_arch;
 regex_t build_project_repo_arch_foo;
 regex_t build_project_repo_arch_failed;
+regex_t source_myprojectpackages;
 
 char *file_cache_dir = NULL;	/* directory to keep cached file contents in */
 int file_cache_count = 1;	/* used to make up names for cached files */
@@ -300,26 +301,49 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   }
   
   /* directory entry */
-  if (fb->in_dir && (!strcmp(name, "entry") || !strcmp(name, "binary") || !strcmp(name, "project"))) {
+  if (fb->in_dir && (!strcmp(name, "entry") || !strcmp(name, "binary") || !strcmp(name, "project") || !strcmp(name, "package"))) {
     const char *filename = NULL;
     char *symlink = NULL;
     
     stat_make_dir(&st);	/* assume it's a directory until we know better */
     /* process all attributes */
     while (*atts) {
+      /* key/value filtering */
       if (fb->filter_attr && !strcmp(atts[0], fb->filter_attr) && strcmp(atts[1], fb->filter_value)) {
+        /* entry doesn't match the filter, skip it */
         filename = NULL;
         break;
       }
+
+      /* "name" attribute occurs in "directory" "entry"s and "collection" "project"s and "package"s */
       if (!strcmp(atts[0], "name")) {
-        filename = atts[1];
         if (fb->in_collection) {
-          stat_make_symlink(&st);
-          symlink = malloc(strlen("../") + strlen(filename) + 1);
-          sprintf(symlink, "../%s", filename);
+          /* this is a collection, so we assume we're dealing with a package or project list for _my_p* */
+          if (!strcmp(name, "package")) {
+            if (endswith(fb->fs_path, "/_my_packages")) {
+              /* nothing to do, we're trying to list projects, so we wait for the "project" attribute */
+            }
+            else {
+              /* it's a file below _my_packages/<project>, it should symlink to the package in the /source
+                 tree */
+              stat_make_symlink(&st);
+              filename = atts[1];
+              char *project = rindex(fb->fs_path, '/') + 1;
+              symlink = malloc(strlen("../../") + strlen(project) + 1 /* slash */ + strlen(filename) + 1);
+              sprintf(symlink, "../../%s/%s", project, filename);
+            }
+          }
+          else {
+            /* project list, all entries symlink to /build/<project> or /source/<project> */
+            filename = atts[1];
+            stat_make_symlink(&st);
+            symlink = malloc(strlen("../") + strlen(filename) + 1);
+            sprintf(symlink, "../%s", filename);
+          }
         }
         else {
           /* entry in a "directory" directory; we assume it is itself a directory */
+          filename = atts[1];
           /* Muddy waters:
              - There are entries in the /published tree that don't
                have a size, but are files anyway.
@@ -342,6 +366,21 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       else if (!strcmp(atts[0], "mtime")) {
         st.st_mtime = atoi(atts[1]);
       }
+      else if (!strcmp(atts[0], "project")) {
+        /* "project" attributes are exclusive to "package" entries
+           We are interested in this attribute when we try to make a list of projects
+           for the user's packages. */
+        if (endswith(fb->fs_path, "/_my_packages")) {
+          char *full_path = malloc(strlen(fb->fs_path) + 1 /* slash */ + strlen(atts[1]) + 1);
+          sprintf(full_path, "%s/%s", fb->fs_path, atts[1]);
+          /* Only add this project if it isn't already there.
+             (We are processing a list of packages here, several of which can come from
+             the same project.) */
+          if (!attr_cache_find(full_path))
+            filename = atts[1];
+          free(full_path);
+        }
+      }
       atts += 2; /* expat hands us a string array with name/value pairs */
     }
     if (filename) {
@@ -354,6 +393,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       }
       
       add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, symlink, NULL);
+
       if (symlink)
         free(symlink);
     }
@@ -361,13 +401,16 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   
   stat_default_file(&st);
   
+  /* "status" entries in "result" lists, used to build the _failed dirs */
   if (fb->in_dir && !strcmp(name, "status")) {
     const char *packagename = NULL;
     for (; *atts; atts += 2) {
+      /* key/value filtering */
       if (fb->filter_attr && !strcmp(atts[0], fb->filter_attr) && strcmp(atts[1], fb->filter_value)) {
         packagename = NULL;
         break;
       }
+      /* package name */
       if (!strcmp(atts[0], "package")) {
         packagename = atts[1];
         stat_make_file(&st);
@@ -585,12 +628,40 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       free(repo);
       free(arch);
     }
-    else if (!strcmp("/build/_my_projects", path) || !strcmp("/source/_my_projects", path)) {
-      const char *my_project_path_format = "/search/project_id?match=person/@userid+=+'%s'";
-      char *my_project_path = malloc(strlen(my_project_path_format) + strlen(options.api_username));
-      sprintf(my_project_path, my_project_path_format, options.api_username);
-      parse_dir(buf, filler, newdir, path, my_project_path, canon_path, NULL, NULL, NULL);
-      free(my_project_path);
+    /* Or is it "/source/_my_{project,package}s"? */
+    else if (!regexec(&source_myprojectpackages, canon_path, 10, matches, 0)) {
+      char *projectpackage = get_match(matches[1], canon_path); /* "project" or "package" */
+      char *project = get_match(matches[2], canon_path);	/* project name */
+      DEBUG("REGEX projectpackage %s project %s\n", projectpackage, project);
+      const char *my_p_path_format;
+      char *my_p_path;
+      if (!strcmp(projectpackage, "project") || strlen(project) == 0) {
+        /* /source/_my_projects or /source/_my_packages */
+        my_p_path_format = "/search/%s_id?match=person/@userid+=+'%s'";
+        my_p_path = malloc(strlen(my_p_path_format) + strlen(options.api_username) + strlen(projectpackage));
+        sprintf(my_p_path, my_p_path_format, projectpackage, options.api_username);
+      }
+      else {
+        /* /source/_my_packages/<project> */
+        my_p_path_format = "/search/package_id?match=person/@userid+=+'%s'+and+@project+=+'%s'";
+        my_p_path = malloc(strlen(my_p_path_format) + strlen(options.api_username) + strlen(projectpackage) + strlen(project));
+        sprintf(my_p_path, my_p_path_format, options.api_username, project + 1 /* skip leading slash */);
+      }
+      parse_dir(buf, filler, newdir, path, my_p_path, canon_path, NULL, NULL, NULL);
+      free(my_p_path);
+      free(projectpackage);
+      free(project);
+    }
+    /* It doesn't make sense to have a /build/_my_packages dir because the
+       /build tree adds the architecture level, meaning that there is more
+       than one directory for each package.  /build/_my_projects maps fine,
+       though, and that's why it is handled here.  */
+    else if (!strcmp("/build/_my_projects", canon_path)) {
+      const char *my_p_path_format = "/search/project_id?match=person/@userid+=+'%s'";
+      char *my_p_path = malloc(strlen(my_p_path_format) + strlen(options.api_username));
+      sprintf(my_p_path, my_p_path_format, options.api_username);
+      parse_dir(buf, filler, newdir, path, my_p_path, canon_path, NULL, NULL, NULL);
+      free(my_p_path);
     }
     else {
       /* regular directory, no special handling */
@@ -634,10 +705,13 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
         }
       }
     }
-    if (!strcmp("/build", path) || !strcmp("/source", path)) {
+    /* add _my_packages to /source and _my_packages and _my_projects to /source */
+    if (!strcmp("/source", path) || !strcmp("/build", path)) {
       struct stat st;
       stat_default_dir(&st);
       add_dir_node(buf, filler, newdir, path, "_my_projects", &st, NULL, NULL);
+      if (!strcmp("/source", path))
+        add_dir_node(buf, filler, newdir, path, "_my_packages", &st, NULL, NULL);
     }
   }
   return 0;
@@ -982,6 +1056,7 @@ static void compile_regexes(void)
   regcomp(&build_project_repo_arch, "/build/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
   regcomp(&build_project_repo_arch_foo, "/build/[^/]*/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
   regcomp(&build_project_repo_arch_failed, "/build/([^/]*)/([^/]*)/([^/]*)/_failed", REG_EXTENDED);
+  regcomp(&source_myprojectpackages, "/source/_my_(project|package)s(/[^/]*)?$", REG_EXTENDED);
 }
 
 static void free_regexes(void)
@@ -993,6 +1068,7 @@ static void free_regexes(void)
   regfree(&build_project_repo_arch);
   regfree(&build_project_repo_arch_foo);
   regfree(&build_project_repo_arch_failed);
+  regfree(&source_myprojectpackages);
 }
 
 static struct fuse_operations obsfs_oper = {
