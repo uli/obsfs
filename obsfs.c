@@ -39,6 +39,7 @@
 #include "cache.h"
 #include "util.h"
 #include "status.h"
+#include "rc.h"
 
 #ifdef DEBUG_OBSFS
 #define DEBUG(x...) fprintf(stderr, x)
@@ -1090,6 +1091,12 @@ static struct fuse_operations obsfs_oper = {
 int main(int argc, char *argv[])
 {
   int ret;
+  /* libfuse messes with the environment, so we get what we need to know to
+     find the .oscrc file now. */
+  const char *home = getenv("HOME");
+  const char *oscrc = getenv("OSCRC_CONFIG");
+  if (!home)
+    return -1;
 
   /* parse filesystem options */
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
@@ -1104,6 +1111,16 @@ int main(int argc, char *argv[])
   if (fuse_opt_parse(&args, &options, obsfs_opts, NULL) == -1)
     return -1;
 
+  if (!options.api_username || !options.api_password) {
+    /* No credentials given, so we try to read them from the .oscrc file. */
+    if (rc_get_account(options.api_hostname ? : DEFAULT_HOST, home, oscrc,
+                       &options.api_username, &options.api_password)) {
+      fprintf(stderr, "could not retrieve account from oscrc file\n");
+      return -1;
+    }
+    /* api_username and api_password are never free()d, but they are just a couple of bytes. */
+  }
+  
   /* initialize libcurl */
   if (curl_global_init(CURL_GLOBAL_ALL))
     return -1;
