@@ -277,14 +277,6 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
   free(full_path);
 }
 
-static int endswith(const char *str, const char *end)
-{
-  if (strlen(str) < strlen(end))
-    return 0;
-  else
-    return !strcmp(str + strlen(str) - strlen(end), end);
-}
-
 /* expat tag start callback for reading API directories */
 static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char **atts)
 {
@@ -349,7 +341,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
              - There are entries in the /published tree that don't
                have a size, but are files anyway.
              - Everything in /request is a file. */
-          if (endswith(filename, ".rpm") || endswith(fb->api_path, "/request"))
+          if (is_a_file(fb->api_path, filename) || endswith(fb->api_path, "/request"))
             stat_make_file(&st);
         }
       }

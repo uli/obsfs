@@ -26,3 +26,6 @@ char *dirname_c(const char *path, char **basenm);
 char *make_url(const char *url_prefix, const char *path);
 
 char *get_match(regmatch_t match, const char *str);
+
+int is_a_file(const char *path, const char *filename);
+int endswith(const char *str, const char *end);
