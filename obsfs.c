@@ -1035,7 +1035,7 @@ static void *obsfs_init(struct fuse_conn_info *conn)
   if (options.api_hostname)
     host = options.api_hostname;
   else
-    host = "api.opensuse.org";
+    host = DEFAULT_HOST;
   url_prefix = malloc(strlen(host) + strlen("https://") + 1);
   sprintf(url_prefix, "https://%s", host);
 

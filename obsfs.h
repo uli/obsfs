@@ -28,3 +28,5 @@
 #define DIR_CACHE_TIMEOUT 20
 #define ATTR_CACHE_TIMEOUT 3600
 #define FILE_CACHE_TIMEOUT 600
+
+#define DEFAULT_HOST "api.opensuse.org"
