@@ -56,6 +56,7 @@ const char *root_dir[] = {
   "/source",
   "/published",
   "/request",
+  "/statistics",
   NULL
 };
 
@@ -224,6 +225,7 @@ struct filbuf {
   dir_t *cdir;			/* dir cache entry to fill in */
   int in_dir;			/* flag set when inside a <directory> or <binarylist> */
   int in_collection;		/* flag set when inside a <collection> */
+  int in_latest;		/* flag set when inside a <latest_*> (statistics) */
   const char *filter_attr;
   const char *filter_value;
 };
@@ -285,10 +287,13 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   stat_default_file(&st);
 
   /* start of directory */
-  if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result") || !strcmp(name, "collection")) {
+  if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result") ||
+      !strcmp(name, "collection") || !strcmp(name, "latest_added") || !strcmp(name, "latest_updated")) {
     fb->in_dir = 1;
     if (!strcmp(name, "collection"))
       fb->in_collection = 1;
+    if (!strcmp(name, "latest_added") || !strcmp(name, "latest_updated"))
+      fb->in_latest = 1;
     return;
   }
   
@@ -334,6 +339,9 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
             sprintf(symlink, "../%s", filename);
           }
         }
+        else if (fb->in_latest) {
+          filename = atts[1];
+        }
         else {
           /* entry in a "directory" directory; we assume it is itself a directory */
           filename = atts[1];
@@ -360,10 +368,14 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         st.st_mtime = atoi(atts[1]);
       }
       else if (!strcmp(atts[0], "project")) {
+        if (fb->in_latest) {
+          relink = malloc(strlen("../../source/") + strlen(atts[1]) + strlen("/%s") + 1);
+          sprintf(relink, "../../source/%s/%%s", atts[1]);
+        }
         /* "project" attributes are exclusive to "package" entries
            We are interested in this attribute when we try to make a list of projects
            for the user's packages. */
-        if (endswith(fb->fs_path, "/_my_packages")) {
+        else if (endswith(fb->fs_path, "/_my_packages")) {
           char *full_path = malloc(strlen(fb->fs_path) + 1 /* slash */ + strlen(atts[1]) + 1);
           sprintf(full_path, "%s/%s", fb->fs_path, atts[1]);
           /* Only add this project if it isn't already there.
@@ -655,6 +667,12 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       sprintf(my_p_path, my_p_path_format, options.api_username);
       parse_dir(buf, filler, newdir, path, my_p_path, canon_path, NULL, NULL);
       free(my_p_path);
+    }
+    else if (!strcmp("/statistics", canon_path)) {
+      struct stat st;
+      stat_default_dir(&st);
+      add_dir_node(buf, filler, newdir, path, "latest_added", &st, NULL, NULL);
+      add_dir_node(buf, filler, newdir, path, "latest_updated", &st, NULL, NULL);
     }
     else {
       /* regular directory, no special handling */
