@@ -67,6 +67,7 @@ regex_t build_project_failed_foo_bar;
 regex_t build_project_repo_arch;
 regex_t build_project_repo_arch_foo;
 regex_t build_project_repo_arch_failed;
+regex_t source_project_package;
 regex_t source_myprojectpackages;
 
 char *file_cache_dir = NULL;	/* directory to keep cached file contents in */
@@ -716,6 +717,20 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
         }
       }
     }
+    /* "_activity", "_rating" special nodes (statistics) */
+    if (!regexec(&source_project_package, path, 3, matches, 0)) {
+      struct stat st;
+      stat_default_file(&st);
+      const char *sf = "/statistics/%s/%s/%s";	/* hardlink to statistics tree */
+      char *project = get_match(matches[1], path);
+      char *package = get_match(matches[2], path);
+      char *hardlink = malloc(strlen(sf) + strlen("activity") + strlen(project) + strlen(package));
+      sprintf(hardlink, sf, "activity", project, package);
+      add_dir_node(buf, filler, newdir, path, "_activity", &st, NULL, hardlink);
+      sprintf(hardlink, sf, "rating", project, package);
+      add_dir_node(buf, filler, newdir, path, "_rating", &st, NULL, hardlink);
+      free(hardlink);
+    }
     /* add _my_packages to /source and _my_packages and _my_projects to /source */
     if (!strcmp("/source", path) || !strcmp("/build", path)) {
       struct stat st;
@@ -1069,6 +1084,7 @@ static void compile_regexes(void)
   regcomp(&build_project_repo_arch, "/build/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
   regcomp(&build_project_repo_arch_foo, "/build/[^/]*/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
   regcomp(&build_project_repo_arch_failed, "/build/([^/]*)/([^/]*)/([^/]*)/_failed", REG_EXTENDED);
+  regcomp(&source_project_package, "/source/([^/]*)/([^/]*)$", REG_EXTENDED);
   regcomp(&source_myprojectpackages, "/source/_my_(project|package)s(/[^/]*)?$", REG_EXTENDED);
 }
 
@@ -1081,6 +1097,7 @@ static void free_regexes(void)
   regfree(&build_project_repo_arch);
   regfree(&build_project_repo_arch_foo);
   regfree(&build_project_repo_arch_failed);
+  regfree(&source_project_package);
   regfree(&source_myprojectpackages);
 }
 
