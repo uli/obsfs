@@ -226,7 +226,6 @@ struct filbuf {
   int in_collection;		/* flag set when inside a <collection> */
   const char *filter_attr;
   const char *filter_value;
-  const char *relink;
 };
 
 /* add a node to a FUSE directory buffer, a directory cache entry, and the attribute cache */
@@ -297,6 +296,7 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
   if (fb->in_dir && (!strcmp(name, "entry") || !strcmp(name, "binary") || !strcmp(name, "project") || !strcmp(name, "package"))) {
     const char *filename = NULL;
     char *symlink = NULL;
+    char *relink = NULL;
     
     stat_make_dir(&st);	/* assume it's a directory until we know better */
     /* process all attributes */
@@ -377,12 +377,13 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       atts += 2; /* expat hands us a string array with name/value pairs */
     }
     if (filename) {
-      if (fb->relink) {
+      if (relink) {
         /* have this entry symlink to a file with the same name in a different directory */
-        symlink = malloc(strlen(fb->relink) + strlen(filename) + 1);
-        sprintf(symlink, fb->relink, filename);
+        symlink = malloc(strlen(relink) + strlen(filename) + 1);
+        sprintf(symlink, relink, filename);
         //DEBUG("YYYYYYYYYY relinking to %s from %s\n", symlink, fb->fs_path);
         st.st_mode = S_IFLNK;
+        free(relink);
       }
       
       add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, symlink, NULL);
@@ -465,7 +466,7 @@ static CURL *curl_open_file(const char *url, void *read_fun, void *read_data, vo
 }
 
 static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const char *fs_path, const char *api_path,
-                      const char *mangled_path, const char *filter_attr, const char *filter_value, const char *relink)
+                      const char *mangled_path, const char *filter_attr, const char *filter_value)
 {
   char *urlbuf;	/* used to compose the full API URL */
   CURL *curl;
@@ -489,7 +490,6 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   fb.in_dir = 0;
   fb.filter_attr = filter_attr;
   fb.filter_value = filter_value;
-  fb.relink = relink;
   XML_SetUserData(xp, (void *)&fb);	/* pass the data to the parser */
 
   /* set handlers for start and end tags */
@@ -615,7 +615,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       sprintf(respath, "/build/%s/_result?repository=%s&arch=%s", project, repo, arch);
       
       /* parse only those entries that have attribute "code" with value "failed" */
-      parse_dir(buf, filler, newdir, path, respath, canon_path, "code", "failed", NULL);
+      parse_dir(buf, filler, newdir, path, respath, canon_path, "code", "failed");
       free(respath);
       free(project);
       free(repo);
@@ -640,7 +640,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
         my_p_path = malloc(strlen(my_p_path_format) + strlen(options.api_username) + strlen(projectpackage) + strlen(project));
         sprintf(my_p_path, my_p_path_format, options.api_username, project + 1 /* skip leading slash */);
       }
-      parse_dir(buf, filler, newdir, path, my_p_path, canon_path, NULL, NULL, NULL);
+      parse_dir(buf, filler, newdir, path, my_p_path, canon_path, NULL, NULL);
       free(my_p_path);
       free(projectpackage);
       free(project);
@@ -653,12 +653,12 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       const char *my_p_path_format = "/search/project_id?match=person/@userid+=+'%s'";
       char *my_p_path = malloc(strlen(my_p_path_format) + strlen(options.api_username));
       sprintf(my_p_path, my_p_path_format, options.api_username);
-      parse_dir(buf, filler, newdir, path, my_p_path, canon_path, NULL, NULL, NULL);
+      parse_dir(buf, filler, newdir, path, my_p_path, canon_path, NULL, NULL);
       free(my_p_path);
     }
     else {
       /* regular directory, no special handling */
-      parse_dir(buf, filler, newdir, path, canon_path, canon_path, NULL, NULL, NULL);
+      parse_dir(buf, filler, newdir, path, canon_path, canon_path, NULL, NULL);
     }
     free(canon_path);
     
