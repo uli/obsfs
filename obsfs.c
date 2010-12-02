@@ -733,10 +733,12 @@ static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     for(d = root_dir; *d; d++) {
       filler(buf, (*d)+1 /* skip slash */, &st, 0);
     }
+    return 0;
   }
-  
-  /* If it's not the root directory, we get it from the API server (or dir cache). */
-  return get_api_dir(path, buf, filler);
+  else {
+    /* If it's not the root directory, we get it from the API server (or dir cache). */
+    return get_api_dir(path, buf, filler);
+  }
 }
 
 /* retrieve a file, store it in our local file cache, and return a descriptor
