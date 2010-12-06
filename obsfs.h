@@ -18,6 +18,8 @@
  *
  */
 
+#define OBSFS_VERSION "0.1"
+
 /* cache timeouts */
 
 /* Directories are updated frequently as packages build or fail, but

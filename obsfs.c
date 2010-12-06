@@ -81,11 +81,20 @@ struct options {
 /* lifted from the Hello, World with options example */
 #define OBSFS_OPT_KEY(t, p, v) { t, offsetof(struct options, p), v }
 
+enum {
+  KEY_HELP,
+  KEY_VERSION
+};
+
 static struct fuse_opt obsfs_opts[] =
 {
   OBSFS_OPT_KEY("user=%s", api_username, 0),
   OBSFS_OPT_KEY("pass=%s", api_password, 0),
   OBSFS_OPT_KEY("host=%s", api_hostname, 0),
+  FUSE_OPT_KEY("-h",		KEY_HELP),
+  FUSE_OPT_KEY("--help",	KEY_HELP),
+  FUSE_OPT_KEY("-V",		KEY_VERSION),
+  FUSE_OPT_KEY("--version",	KEY_VERSION),
   FUSE_OPT_END
 };
 
@@ -1086,6 +1095,36 @@ static struct fuse_operations obsfs_oper = {
   .unlink = obsfs_unlink,
 };
 
+static int obsfs_opt_proc(void *data, const char *arg, int key, struct fuse_args *outargs)
+{
+  switch (key) {
+    case KEY_HELP:
+      fprintf(stderr,
+        "usage: %s mountpoint [options]\n"
+        "\n"
+        "general options:\n"
+        "    -o opt,[opt...]        mount options\n"
+        "    -h   --help            print help\n"
+        "    -V   --version         print version\n"
+        "\n"
+        "obsfs options:\n"
+        "    -o host=STRING         OBS server name (" DEFAULT_HOST ")\n"
+        "    -o user=STRING         OBS user name (from .oscrc)\n"
+        "    -o pass=STRING         OBS password (from .oscrc)\n"
+        "\n"
+        , outargs->argv[0]);
+      fuse_opt_add_arg(outargs, "-ho");
+      fuse_main(outargs->argc, outargs->argv, &obsfs_oper, NULL);
+      exit(1);
+    case KEY_VERSION:
+      fprintf(stderr, "obsfs " OBSFS_VERSION "\n");
+      fuse_opt_add_arg(outargs, "--version");
+      fuse_main(outargs->argc, outargs->argv, &obsfs_oper, NULL);
+      exit(1);
+  };
+  return 1;
+}
+
 int main(int argc, char *argv[])
 {
   int ret;
@@ -1106,7 +1145,7 @@ int main(int argc, char *argv[])
   args.argv[args.argc] = NULL;
   
   memset(&options, 0, sizeof(struct options));
-  if (fuse_opt_parse(&args, &options, obsfs_opts, NULL) == -1)
+  if (fuse_opt_parse(&args, &options, obsfs_opts, obsfs_opt_proc) == -1)
     return -1;
 
   if (!options.api_username || !options.api_password) {
