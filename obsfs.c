@@ -47,10 +47,6 @@
 #define DEBUG(x...)
 #endif
 
-/* leftovers from the Hello, World example */
-static const char *hello_str = "Hello World!\n";
-static const char *hello_path = "/hello";
-
 const char *root_dir[] = {
   "/build",
   "/source",
@@ -150,10 +146,6 @@ static int obsfs_getattr(const char *path, struct stat *stbuf)
        returns a human-readable info page for "/", so they are hardcoded
        here. */
     stat_make_dir(stbuf);
-  } else if (strcmp(path, hello_path) == 0) {
-    stbuf->st_mode = S_IFREG | 0444;
-    stbuf->st_nlink = 1;
-    stbuf->st_size = strlen(hello_str);
   } else {
     /* actual API files and directories */
     attr_t *ret;
@@ -759,7 +751,6 @@ static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   if (!strcmp(path, "/") && filler && buf) {
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
-    filler(buf, hello_path + 1, NULL, 0);
     st.st_mode = S_IFDIR;
     const char **d;
     /* fill in the root directory entries */
@@ -786,14 +777,6 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   const char *relpath = path + 1; /* skip leading slash */
   attr_t *at = attr_cache_find(path);
   
-  /* leftovers from Hello, World example */
-  if (strcmp(path, hello_path) == 0) {
-    if ((fi->flags & 3) != O_RDONLY)
-      return -EACCES;
-    fi->fh = 0;
-    return 0;
-  }
-
   /* discard unmodified cached files that have expired */
   if (!lstat(relpath, &st)) {
     if (at && !at->modified && (time(NULL) - st.st_mtime) > FILE_CACHE_TIMEOUT) {
@@ -852,20 +835,6 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
 static int obsfs_read(const char *path, char *buf, size_t size, off_t offset,
                       struct fuse_file_info *fi)
 {
-  size_t len;
-  /* Hello, World leftover */
-  if (strcmp(path, hello_path) == 0) {
-    len = strlen(hello_str);
-    if (offset < len) {
-      if (offset + size > len)
-        size = len - offset;
-      memcpy(buf, hello_str + offset, size);
-    } else
-      size = 0;
-
-    return size;
-  }
-  
   /* read from the cache file */
   int ret = pread(fi->fh, buf, size, offset);
   if (ret < 0)
