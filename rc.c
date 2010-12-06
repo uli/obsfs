@@ -27,7 +27,7 @@
 
 #include "rc.h"
 
-#define DEBUG_RC
+//#define DEBUG_RC
 
 #ifdef DEBUG_RC
 #define DEBUG(x...) fprintf(stderr, x)
