@@ -1,0 +1,18 @@
+obsfs -- openSUSE Build Service FUSE File System
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+http://github.com/uli/obsfs
+
+Usage: obsfs mountpoint [options]
+
+general options:
+    -o opt,[opt...]        mount options
+    -h   --help            print help
+    -V   --version         print version
+
+obsfs options:
+    -o host=STRING         OBS server name (api.opensuse.org)
+    -o user=STRING         OBS user name (from .oscrc)
+    -o pass=STRING         OBS password (from .oscrc)
+
+Run "obsfs --help" for more options.
