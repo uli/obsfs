@@ -470,13 +470,13 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
     abort();
 
   /* copy some data that the parser callbacks will need */
+  memset(&fb, 0, sizeof(fb));
   fb.filler = filler;
   fb.buf = buf;
   fb.fs_path = fs_path;
   fb.api_path = api_path;
   fb.mangled_path = mangled_path;
   fb.cdir = newdir;
-  fb.in_dir = 0;
   fb.filter_attr = filter_attr;
   fb.filter_value = filter_value;
   XML_SetUserData(xp, (void *)&fb);	/* pass the data to the parser */
