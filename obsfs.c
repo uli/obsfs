@@ -64,6 +64,7 @@ regex_t build_project_repo_arch;
 regex_t build_project_repo_arch_foo;
 regex_t build_project_repo_arch_failed;
 regex_t source_project_package;
+regex_t source_project_package_unexpanded;
 regex_t source_myprojectpackages;
 
 char *file_cache_dir = NULL;	/* directory to keep cached file contents in */
@@ -274,10 +275,17 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
     return;
   }
   
+  if (fb->in_dir && !strcmp(name, "linkinfo") && !endswith(fb->fs_path, "/" NODE_UNEXPANDED)) {
+    /* add an "_unexpanded" directory entry to allow access to the unmerged sources */
+    stat_make_dir(&st);
+    add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, NODE_UNEXPANDED, &st, NULL, NULL);
+  }
+  
   /* directory entry */
   if (fb->in_dir && (!strcmp(name, "entry") || !strcmp(name, "binary") || !strcmp(name, "project") || !strcmp(name, "package"))) {
     const char *filename = NULL;
     char *symlink = NULL;
+    char *hardlink = NULL;
     char *relink = NULL;
     
     stat_make_dir(&st);	/* assume it's a directory until we know better */
@@ -322,6 +330,10 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         else {
           /* entry in a "directory" directory; we assume it is itself a directory */
           filename = atts[1];
+          if (endswith(fb->fs_path, "/" NODE_UNEXPANDED)) {
+            hardlink = malloc(strlen(fb->api_path) + 1 + strlen(filename) + 1);
+            sprintf(hardlink, "%s/%s", fb->api_path, filename);
+          }
           /* Muddy waters:
              - There are entries in the /published tree that don't
                have a size, but are files anyway.
@@ -375,10 +387,12 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
         free(relink);
       }
       
-      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, symlink, NULL);
+      add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, filename, &st, symlink, hardlink);
 
       if (symlink)
         free(symlink);
+      if (hardlink)
+        free(hardlink);
     }
   }
   
@@ -658,6 +672,10 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       parse_dir(buf, filler, newdir, path, expandpath, canon_path, NULL, NULL);
       free(expandpath);
     }
+    else if (!regexec(&source_project_package_unexpanded, canon_path, 10, matches, 0)) {
+      /* subdirectory containing unexpanded sources */
+      parse_dir(buf, filler, newdir, path, get_match(matches[1], canon_path), canon_path, NULL, NULL);
+    }
     else {
       /* regular directory, no special handling */
       parse_dir(buf, filler, newdir, path, canon_path, canon_path, NULL, NULL);
@@ -787,11 +805,8 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   
     /* find out if this file is supposed to hardlink somewhere */
     const char *effective_path = path;
-    if (at) {
-      if (at->hardlink) {
-        //DEBUG("BBBBBBBBB %s hardlinks to %s\n", path, a->hardlink);
-        effective_path = at->hardlink;
-      }
+    if (at && at->hardlink) {
+      effective_path = at->hardlink;
     }
 
     /* compose the full URL */
@@ -1050,6 +1065,7 @@ static void compile_regexes(void)
   regcomp(&build_project_repo_arch_foo, "/build/[^/]*/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
   regcomp(&build_project_repo_arch_failed, "/build/([^/]*)/([^/]*)/([^/]*)/" NODE_FAILED, REG_EXTENDED);
   regcomp(&source_project_package, "/source/([^/]*)/([^/]*)$", REG_EXTENDED);
+  regcomp(&source_project_package_unexpanded, "(/source/[^/]*/[^/]*)/" NODE_UNEXPANDED "$", REG_EXTENDED);
   regcomp(&source_myprojectpackages, "/source/_my_(project|package)s(/[^/]*)?$", REG_EXTENDED);
 }
 
@@ -1063,6 +1079,7 @@ static void free_regexes(void)
   regfree(&build_project_repo_arch_foo);
   regfree(&build_project_repo_arch_failed);
   regfree(&source_project_package);
+  regfree(&source_project_package_unexpanded);
   regfree(&source_myprojectpackages);
 }
 

@@ -33,4 +33,5 @@
 
 #define DEFAULT_HOST "api.opensuse.org"
 
+#define NODE_UNEXPANDED "_unexpanded"
 #define NODE_FAILED "_failed"
