@@ -567,21 +567,21 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
     /* handle the build/<project>/_failed/... tree
        This tree collects all the fail logs to make it easier to get
        an overview of failing packages using, for instance, find. */
-    if ((fpath = strstr(canon_path, "/_failed"))) {
+    if ((fpath = strstr(canon_path, "/" NODE_FAILED))) {
       char *opath = canon_path;		/* original path requested */
       if (!regexec(&build_project_failed_foo_bar, canon_path, 0, matches, 0)) {
         /* build/<project>/_failed/<foo>/<bar> is equivalent to
            build/<project>/<foo>/<bar>/_failed */
-        canon_path = strstripcpy(opath, "/_failed");	/* remove "/_failed" */
+        canon_path = strstripcpy(opath, "/" NODE_FAILED);	/* remove "/_failed" */
         free(opath);
-        strcat(canon_path, "/_failed");		/* ...and add it again at the end */
+        strcat(canon_path, "/" NODE_FAILED);		/* ...and add it again at the end */
         mangled_path = 1;
       }
       else if (!regexec(&build_project_failed_foo, canon_path, 0, matches, 0) ||
           !regexec(&build_project_failed, canon_path, 5, matches, 0)) {
         /* build/<project>/_failed and build/<project>/_failed/<foo> are
            equivalent to build/<project> and build/<project>/<foo>, respectively */
-        canon_path = strstripcpy(opath, "/_failed");	/* remove the "/_failed" */
+        canon_path = strstripcpy(opath, "/" NODE_FAILED);	/* remove the "/_failed" */
         free(opath);
         mangled_path = 1;	/* remember that we messed with the path so we don't add
                                    another "_failed" entry to this directory */
@@ -678,7 +678,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
         /* build/<project>/<repo>/<arch>/_failed and build/<project>/_failed */
         struct stat st;
         stat_default_dir(&st);
-        add_dir_node(buf, filler, newdir, path, "_failed", &st, NULL, NULL);
+        add_dir_node(buf, filler, newdir, path, NODE_FAILED, &st, NULL, NULL);
       }
       /* log, history, status, and reason for packages */
       if (regexec(&build_project_repo_arch_failed, path, 0, matches, 0)
@@ -1038,12 +1038,12 @@ static void obsfs_destroy(void *foo)
 static void compile_regexes(void)
 {
   regcomp(&build_project, "/build/[^/_][^/]*$", REG_EXTENDED);
-  regcomp(&build_project_failed, "/build/[^/_][^/]*/_failed", REG_EXTENDED);
-  regcomp(&build_project_failed_foo, "/build/[^/_][^/]*/_failed/[^/]*", REG_EXTENDED);
-  regcomp(&build_project_failed_foo_bar, "/build/[^/_][^/]*/_failed/[^/]*/[^/]*", REG_EXTENDED);
+  regcomp(&build_project_failed, "/build/[^/_][^/]*/" NODE_FAILED, REG_EXTENDED);
+  regcomp(&build_project_failed_foo, "/build/[^/_][^/]*/" NODE_FAILED "/[^/]*", REG_EXTENDED);
+  regcomp(&build_project_failed_foo_bar, "/build/[^/_][^/]*/" NODE_FAILED "/[^/]*/[^/]*", REG_EXTENDED);
   regcomp(&build_project_repo_arch, "/build/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
   regcomp(&build_project_repo_arch_foo, "/build/[^/]*/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
-  regcomp(&build_project_repo_arch_failed, "/build/([^/]*)/([^/]*)/([^/]*)/_failed", REG_EXTENDED);
+  regcomp(&build_project_repo_arch_failed, "/build/([^/]*)/([^/]*)/([^/]*)/" NODE_FAILED, REG_EXTENDED);
   regcomp(&source_project_package, "/source/([^/]*)/([^/]*)$", REG_EXTENDED);
   regcomp(&source_myprojectpackages, "/source/_my_(project|package)s(/[^/]*)?$", REG_EXTENDED);
 }

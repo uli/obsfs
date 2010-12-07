@@ -32,3 +32,5 @@
 #define FILE_CACHE_TIMEOUT 600
 
 #define DEFAULT_HOST "api.opensuse.org"
+
+#define NODE_FAILED "_failed"
