@@ -52,11 +52,13 @@ static void free_attr(attr_t *h)
       free(h->symlink);
     if (h->hardlink)
       free(h->hardlink);
+    if (h->rev)
+      free(h->rev);
     free(h);
 }
 
 /* add an entry to the attribute cache */
-void attr_cache_add(const char *path, struct stat *st, const char *symlink, const char *hardlink)
+void attr_cache_add(const char *path, struct stat *st, const char *symlink, const char *hardlink, const char *rev)
 {
   attr_t *h = calloc(1, sizeof(attr_t));
 
@@ -68,6 +70,8 @@ void attr_cache_add(const char *path, struct stat *st, const char *symlink, cons
     h->symlink = strdup(symlink);
   if (hardlink)
     h->hardlink = strdup(hardlink);
+  if (rev)
+    h->rev = strdup(rev);
   h->timestamp = time(NULL);
   
   /* need to delete old entry, if any */
@@ -134,6 +138,8 @@ static void free_dir(dir_t *d)
   int i;
   if (d->path) {
     free(d->path);
+    if (d->rev)
+      free(d->rev);
     if (d->entries) {
       for (i = 0; i < d->num_entries; i++) {
         free(d->entries[i].name);

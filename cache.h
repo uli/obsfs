@@ -28,6 +28,7 @@ typedef struct {
   char *hardlink;
   time_t timestamp;
   int modified;
+  char *rev;	/* build service revision */
   UT_hash_handle hh;
 } attr_t;
 
@@ -44,12 +45,13 @@ typedef struct {
   int num_entries;
   time_t timestamp;
   int modified;
+  char *rev; /* build service revision */
   UT_hash_handle hh;
 } dir_t;
 
 /* attribute cache methods */
 void attr_cache_init(void);
-void attr_cache_add(const char *path, struct stat *st, const char *symlink, const char *hardlink);
+void attr_cache_add(const char *path, struct stat *st, const char *symlink, const char *hardlink, const char *rev);
 attr_t *attr_cache_find(const char *path);
 void attr_cache_free(void);
 void attr_cache_remove(const char *path);

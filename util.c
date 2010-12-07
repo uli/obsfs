@@ -62,10 +62,10 @@ char *dirname_c(const char *path, char **basenm)
   return dirname(p);
 }
 
-char *make_url(const char *url_prefix, const char *path)
+char *make_url(const char *url_prefix, const char *path, const char *rev)
 {
-  char *urlbuf = malloc(strlen(url_prefix) + strlen(path) + 1);
-  sprintf(urlbuf, "%s%s", url_prefix, path);
+  char *urlbuf = malloc(strlen(url_prefix) + strlen(path) + strlen("?rev=") + 32 + 1);
+  sprintf(urlbuf, "%s%s%s%s", url_prefix, path, rev? "?rev=" : "", rev? : "");
   return urlbuf;
 }
 

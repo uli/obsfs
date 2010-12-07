@@ -266,7 +266,7 @@ static void add_dir_node(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const
     st->st_size = local_st.st_size;
   }
 
-  attr_cache_add(full_path, st, symlink, hardlink);
+  attr_cache_add(full_path, st, symlink, hardlink, newdir->rev);
   
   /* add node to the directory cache entry */
   dir_cache_add(newdir, node_name, S_ISDIR(st->st_mode) ? 1 : 0);
@@ -296,6 +296,15 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       fb->in_collection = 1;
     if (!strcmp(name, "latest_added") || !strcmp(name, "latest_updated"))
       fb->in_latest = 1;
+    while (*atts) {
+      if (!strcmp(atts[0], "rev")) {
+        /* when working on expanded sources, we need to specify the revision when GETting
+           files, so we remember it here */
+        fb->cdir->rev = strdup(atts[1]);
+        DEBUG("source dir rev %s\n", fb->cdir->rev);
+      }
+      atts += 2;
+    }
     return;
   }
   
@@ -510,7 +519,7 @@ static void parse_dir(void *buf, fuse_fill_dir_t filler, dir_t *newdir, const ch
   XML_SetElementHandler(xp, expat_api_dir_start, expat_api_dir_end);
   
   /* construct the full API URL for this directory */
-  urlbuf = make_url(url_prefix, api_path);
+  urlbuf = make_url(url_prefix, api_path, NULL);
   
   /* open the URL and set up CURL options */
   curl = curl_open_file(urlbuf, NULL, NULL, write_adapter, xp);
@@ -676,6 +685,13 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       add_dir_node(buf, filler, newdir, path, "latest_added", &st, NULL, NULL);
       add_dir_node(buf, filler, newdir, path, "latest_updated", &st, NULL, NULL);
     }
+    else if (!regexec(&source_project_package, canon_path, 10, matches, 0)) {
+      /* source directories are expanded by default */
+      char *expandpath = malloc(strlen(canon_path) + strlen("?expand=1") + 1);
+      sprintf(expandpath, "%s?expand=1", canon_path);
+      parse_dir(buf, filler, newdir, path, expandpath, canon_path, NULL, NULL);
+      free(expandpath);
+    }
     else {
       /* regular directory, no special handling */
       parse_dir(buf, filler, newdir, path, canon_path, canon_path, NULL, NULL);
@@ -813,7 +829,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
     }
 
     /* compose the full URL */
-    urlbuf = make_url(url_prefix, effective_path);
+    urlbuf = make_url(url_prefix, effective_path, at? at->rev : NULL);
     
     /* retrieve the file from the API server */
     curl = curl_open_file(urlbuf, NULL, NULL, fwrite, fp);
@@ -836,7 +852,7 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
   if (fstat(fi->fh, &st)) {
     perror("fstat");
   }
-  attr_cache_add(path, &st, at? at->symlink : NULL, at? at->hardlink : NULL);
+  attr_cache_add(path, &st, at? at->symlink : NULL, at? at->hardlink : NULL, at? at->rev : NULL);
 
   return 0;
 }
@@ -905,7 +921,7 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
   /* If it has been modified, we need to write it back to the API server. */
   if (at->modified) {
     /* where to PUT it */
-    char *url = make_url(url_prefix, path);
+    char *url = make_url(url_prefix, path, NULL); /* no revision here, we're creating a new one */
     
     if (lseek(fi->fh, 0, SEEK_SET) < 0)
       return -errno;
@@ -974,7 +990,7 @@ static int obsfs_create(const char *path, mode_t mode, struct fuse_file_info *fi
   /* create a new attr cache entry for that file */
   stat_default_file(&st);
   st.st_mode = mode;
-  attr_cache_add(path, &st, NULL, NULL);
+  attr_cache_add(path, &st, NULL, NULL, NULL);
   
   /* add it to its directory in the cache */
   /* FIXME: It won't appear in the upstream directory until the next flush,
@@ -1009,7 +1025,7 @@ static int obsfs_unlink(const char *path)
   rerrno = errno;
   
   /* remove node from server */
-  char *url = make_url(url_prefix, path);
+  char *url = make_url(url_prefix, path, NULL); /* no revision when unlinking */
   CURL *curl = curl_open_file(url, NULL, NULL, write_null, NULL);
   curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
   
