@@ -887,7 +887,12 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
   /* If it has been modified, we need to write it back to the API server. */
   if (at->modified) {
     /* where to PUT it */
-    char *url = make_url(url_prefix, path, NULL); /* no revision here, we're creating a new one */
+    /* find out if this file is supposed to hardlink somewhere */
+    const char *effective_path = path;
+    if (at && at->hardlink) {
+      effective_path = at->hardlink;
+    }
+    char *url = make_url(url_prefix, effective_path, NULL); /* no revision here, we're creating a new one */
     
     if (lseek(fi->fh, 0, SEEK_SET) < 0)
       return -errno;
