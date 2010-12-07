@@ -19,6 +19,7 @@
  */
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <regex.h>
 
 int mkdirp(const char *pathname, mode_t mode);
@@ -29,3 +30,9 @@ char *get_match(regmatch_t match, const char *str);
 
 int is_a_file(const char *path, const char *filename);
 int endswith(const char *str, const char *end);
+
+void stat_make_file(struct stat *st);
+void stat_default_file(struct stat *st);
+void stat_make_symlink(struct stat *st);
+void stat_make_dir(struct stat *st);
+void stat_default_dir(struct stat *st);

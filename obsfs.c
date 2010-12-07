@@ -98,40 +98,6 @@ static struct fuse_opt obsfs_opts[] =
   FUSE_OPT_END
 };
 
-static void stat_make_file(struct stat *st)
-{
-  st->st_mode = S_IFREG | 0644;
-  st->st_uid = getuid();
-  st->st_gid = getgid();
-  st->st_nlink = 1;
-}
-
-static void stat_default_file(struct stat *st)
-{
-  memset(st, 0, sizeof(struct stat));
-  stat_make_file(st);
-}
-
-static void stat_make_symlink(struct stat *st)
-{
-  stat_make_file(st);
-  st->st_mode = S_IFLNK | 0644;
-}
-
-static void stat_make_dir(struct stat *st)
-{
-  st->st_mode = S_IFDIR | 0755;
-  st->st_uid = getuid();
-  st->st_gid = getgid();
-  st->st_nlink = 2;
-}
-
-static void stat_default_dir(struct stat *st)
-{
-  memset(st, 0, sizeof(struct stat));
-  stat_make_dir(st);
-}
-
 static int obsfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                          off_t offset, struct fuse_file_info *fi);
                          

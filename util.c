@@ -26,6 +26,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 
 int mkdirp(const char *pathname, mode_t mode)
 {
@@ -86,6 +87,40 @@ int endswith(const char *str, const char *end)
     return !strcmp(str + strlen(str) - strlen(end), end);
 }
 
+void stat_make_file(struct stat *st)
+{
+  st->st_mode = S_IFREG | 0644;
+  st->st_uid = getuid();
+  st->st_gid = getgid();
+  st->st_nlink = 1;
+}
+
+void stat_default_file(struct stat *st)
+{
+  memset(st, 0, sizeof(struct stat));
+  stat_make_file(st);
+}
+
+void stat_make_symlink(struct stat *st)
+{
+  stat_make_file(st);
+  st->st_mode = S_IFLNK | 0644;
+}
+
+void stat_make_dir(struct stat *st)
+{
+  st->st_mode = S_IFDIR | 0755;
+  st->st_uid = getuid();
+  st->st_gid = getgid();
+  st->st_nlink = 2;
+}
+
+void stat_default_dir(struct stat *st)
+{
+  memset(st, 0, sizeof(struct stat));
+  stat_make_dir(st);
+}
+
 /* extensions associated with files */
 static const char *file_exts[] = {
   ".rpm", ".repo", ".xml", ".gz", ".key", ".asc", ".solv", NULL
@@ -128,3 +163,4 @@ int is_a_file(const char *path, const char *filename)
   
   return 0;
 }
+
