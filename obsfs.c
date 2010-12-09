@@ -63,6 +63,7 @@ regex_t build_project_failed_foo_bar;
 regex_t build_project_repo_arch;
 regex_t build_project_repo_arch_foo;
 regex_t build_project_repo_arch_failed;
+regex_t source_project;
 regex_t source_project_package;
 regex_t source_project_package_unexpanded;
 regex_t source_myprojectpackages;
@@ -719,7 +720,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       }
     }
     /* "_activity", "_rating" special nodes (statistics) */
-    if (!regexec(&source_project_package, path, 3, matches, 0)) {
+    else if (!regexec(&source_project_package, path, 3, matches, 0)) {
       struct stat st;
       stat_default_file(&st);
       const char *sf = "/statistics/%s/%s/%s";	/* hardlink to statistics tree */
@@ -733,12 +734,18 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       free(hardlink);
     }
     /* add _my_packages to /source and _my_packages and _my_projects to /source */
-    if (!strcmp("/source", path) || !strcmp("/build", path)) {
+    else if (!strcmp("/source", path) || !strcmp("/build", path)) {
       struct stat st;
       stat_default_dir(&st);
       add_dir_node(buf, filler, newdir, path, "_my_projects", &st, NULL, NULL);
       if (!strcmp("/source", path))
         add_dir_node(buf, filler, newdir, path, "_my_packages", &st, NULL, NULL);
+    }
+    else if (!regexec(&source_project, path, 2, matches, 0)) {
+      /* /source/<project>/_meta */
+      struct stat st;
+      stat_default_file(&st);
+      add_dir_node(buf, filler, newdir, path, "_meta", &st, NULL, NULL);
     }
   }
   return 0;
@@ -1064,6 +1071,7 @@ static void compile_regexes(void)
   regcomp(&build_project_repo_arch, "/build/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
   regcomp(&build_project_repo_arch_foo, "/build/[^/]*/[^/]*/[^/]*/[^/]*$", REG_EXTENDED);
   regcomp(&build_project_repo_arch_failed, "/build/([^/]*)/([^/]*)/([^/]*)/" NODE_FAILED, REG_EXTENDED);
+  regcomp(&source_project, "/source/([^/]*)$", REG_EXTENDED);
   regcomp(&source_project_package, "/source/([^/]*)/([^/]*)$", REG_EXTENDED);
   regcomp(&source_project_package_unexpanded, "(/source/[^/]*/[^/]*)/" NODE_UNEXPANDED "$", REG_EXTENDED);
   regcomp(&source_myprojectpackages, "/source/_my_(project|package)s(/[^/]*)?$", REG_EXTENDED);
@@ -1078,6 +1086,7 @@ static void free_regexes(void)
   regfree(&build_project_repo_arch);
   regfree(&build_project_repo_arch_foo);
   regfree(&build_project_repo_arch_failed);
+  regfree(&source_project);
   regfree(&source_project_package);
   regfree(&source_project_package_unexpanded);
   regfree(&source_myprojectpackages);
