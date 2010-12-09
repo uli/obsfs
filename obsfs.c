@@ -747,7 +747,11 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       /* /source/<project>/_meta */
       struct stat st;
       stat_default_file(&st);
-      add_dir_node(buf, filler, newdir, path, "_meta", &st, NULL, NULL);
+      const char *nn[] = {"_meta", "_config", "_pubkey", NULL};
+      const char **n;
+      for (n = nn; *n; n++) {
+        add_dir_node(buf, filler, newdir, path, *n, &st, NULL, NULL);
+      }
     }
   }
   return 0;
