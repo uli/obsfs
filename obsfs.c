@@ -719,7 +719,7 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
         }
       }
     }
-    /* "_activity", "_rating" special nodes (statistics) */
+    /* "_activity", "_rating" special nodes (statistics), "_meta", "_history" */
     else if (!regexec(&source_project_package, path, 3, matches, 0)) {
       struct stat st;
       stat_default_file(&st);
@@ -732,6 +732,8 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       sprintf(hardlink, sf, "rating", project, package);
       add_dir_node(buf, filler, newdir, path, "_rating", &st, NULL, hardlink);
       free(hardlink);
+      add_dir_node(buf, filler, newdir, path, "_meta", &st, NULL, NULL);
+      add_dir_node(buf, filler, newdir, path, "_history", &st, NULL, NULL);
     }
     /* add _my_packages to /source and _my_packages and _my_projects to /source */
     else if (!strcmp("/source", path) || !strcmp("/build", path)) {
