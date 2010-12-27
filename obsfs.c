@@ -70,6 +70,8 @@ regex_t build_project_repo_arch_foo;
 regex_t build_project_repo_arch_failed;
 regex_t source_project;
 regex_t source_project_package;
+regex_t source_project_package_rev;
+regex_t source_project_package_rev_num;
 regex_t source_project_package_unexpanded;
 regex_t source_myprojectpackages;
 
@@ -201,6 +203,7 @@ struct filbuf {
   int in_dir;			/* flag set when inside a <directory> or <binarylist> */
   int in_collection;		/* flag set when inside a <collection> */
   int in_latest;		/* flag set when inside a <latest_*> (statistics) */
+  int in_revisionlist;		/* flag set when inside a <revisionlist> */
   const char *filter_attr;
   const char *filter_value;
 };
@@ -263,12 +266,17 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
 
   /* start of directory */
   if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result") ||
-      !strcmp(name, "collection") || !strcmp(name, "latest_added") || !strcmp(name, "latest_updated")) {
+      !strcmp(name, "collection") || !strcmp(name, "latest_added") || !strcmp(name, "latest_updated") ||
+      !strcmp(name, "revisionlist")) {
     fb->in_dir = 1;
+
     if (!strcmp(name, "collection"))
       fb->in_collection = 1;
-    if (!strcmp(name, "latest_added") || !strcmp(name, "latest_updated"))
+    else if (!strcmp(name, "latest_added") || !strcmp(name, "latest_updated"))
       fb->in_latest = 1;
+    else if (!strcmp(name, "revisionlist"))
+      fb->in_revisionlist = 1;
+    
     while (*atts) {
       if (!strcmp(atts[0], "rev")) {
         /* when working on expanded sources, we need to specify the revision when GETting
@@ -334,11 +342,23 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
           filename = atts[1];
         }
         else {
+          regmatch_t matches[10];
           /* entry in a "directory" directory; we assume it is itself a directory */
           filename = atts[1];
           if (endswith(fb->fs_path, "/" NODE_UNEXPANDED)) {
             hardlink = malloc(strlen(fb->api_path) + 1 + strlen(filename) + 1);
             sprintf(hardlink, "%s/%s", fb->api_path, filename);
+          }
+          else if (!regexec(&source_project_package_rev_num, fb->fs_path, 10, matches, 0)) {
+            /* a revision subdirectory entry; when creating this directory, we
+               saved the revision number already, so all we have to do here is
+               to hardlink to the regular source file; "&rev=..." will be added
+               automatically */
+            char *package_path = get_match(matches[1], fb->fs_path);
+            hardlink = malloc(strlen(package_path) + 1 + strlen(filename) + 1);
+            sprintf(hardlink, "%s/%s", package_path, filename);
+            free(package_path);
+            st.st_mode &= ~S_IWUSR;	/* FIXME: overwritten by stat_make_*() */
           }
           /* Muddy waters:
              - There are entries in the /published tree that don't
@@ -438,6 +458,17 @@ static void expat_api_dir_start(void *ud, const XML_Char *name, const XML_Char *
       free(hardlink);
     }
   }
+  
+  /* "revision" entries in "revisionlist" lists, used to build source revision
+     subdirectories */
+  if (fb->in_revisionlist && !strcmp(name, "revision")) {
+    stat_make_dir(&st);
+    for (; *atts; atts += 2) {
+      if (!strcmp(atts[0], "rev")) {
+        add_dir_node(fb->buf, fb->filler, fb->cdir, fb->fs_path, atts[1], &st, NULL, NULL);
+      }
+    }
+  }
 }
 
 /* expat tag end handler for reading API directories */
@@ -448,6 +479,7 @@ static void expat_api_dir_end(void *ud, const XML_Char *name)
   if (!strcmp(name, "directory") || !strcmp(name, "binarylist") || !strcmp(name, "result") || !strcmp(name, "collection")) {
     fb->in_dir = 0;
     fb->in_collection = 0;
+    fb->in_revisionlist = 0;
   }
 }
 
@@ -682,6 +714,27 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       /* subdirectory containing unexpanded sources */
       parse_dir(buf, filler, newdir, path, get_match(matches[1], canon_path), canon_path, NULL, NULL);
     }
+    else if (!regexec(&source_project_package_rev, canon_path, 10, matches, 0)) {
+      /* revisions directory containg all revisions of a package's sources */
+      char *package_path = get_match(matches[1], canon_path);
+      char *revpath = malloc(strlen(package_path) + strlen("/_history"));
+      sprintf(revpath, "%s/_history", package_path);
+      parse_dir(buf, filler, newdir, path, revpath, canon_path, NULL, NULL);
+      free(revpath);
+      free(package_path);
+    }
+    else if (!regexec(&source_project_package_rev_num, canon_path, 10, matches, 0)) {
+      /* a specific source revision's directory */
+      char *package_path = get_match(matches[1], canon_path);
+      char *revision = get_match(matches[2], canon_path);
+      /* source directories are expanded by default */
+      char *expandpath = malloc(strlen(package_path) + strlen("?expand=1&rev=") + strlen(revision) + 1);
+      sprintf(expandpath, "%s?expand=1&rev=%s", package_path, revision);
+      parse_dir(buf, filler, newdir, path, expandpath, canon_path, NULL, NULL);
+      free(expandpath);
+      free(revision);
+      free(package_path);
+    }
     else {
       /* regular directory, no special handling */
       parse_dir(buf, filler, newdir, path, canon_path, canon_path, NULL, NULL);
@@ -736,6 +789,9 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
       free(hardlink);
       add_dir_node(buf, filler, newdir, path, "_meta", &st, NULL, NULL);
       add_dir_node(buf, filler, newdir, path, "_history", &st, NULL, NULL);
+      /* revisions subdirectory */
+      stat_make_dir(&st);
+      add_dir_node(buf, filler, newdir, path, "_rev", &st, NULL, NULL);
     }
     /* add _my_packages to /source and _my_packages and _my_projects to /source */
     else if (!strcmp("/source", path) || !strcmp("/build", path)) {
@@ -1102,6 +1158,8 @@ static void compile_regexes(void)
   regcomp(&build_project_repo_arch_failed, "/build/([^/]*)/([^/]*)/([^/]*)/" NODE_FAILED, REG_EXTENDED);
   regcomp(&source_project, "/source/([^/]*)$", REG_EXTENDED);
   regcomp(&source_project_package, "/source/([^/]*)/([^/]*)$", REG_EXTENDED);
+  regcomp(&source_project_package_rev, "(/source/[^/]*/[^/]*)/_rev$", REG_EXTENDED);
+  regcomp(&source_project_package_rev_num, "(/source/[^/]*/[^/]*)/_rev/([^/]*)$", REG_EXTENDED);
   regcomp(&source_project_package_unexpanded, "(/source/[^/]*/[^/]*)/" NODE_UNEXPANDED "$", REG_EXTENDED);
   regcomp(&source_myprojectpackages, "/source/_my_(project|package)s(/[^/]*)?$", REG_EXTENDED);
 }
@@ -1117,6 +1175,8 @@ static void free_regexes(void)
   regfree(&build_project_repo_arch_failed);
   regfree(&source_project);
   regfree(&source_project_package);
+  regfree(&source_project_package_rev);
+  regfree(&source_project_package_rev_num);
   regfree(&source_project_package_unexpanded);
   regfree(&source_myprojectpackages);
 }
