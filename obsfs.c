@@ -56,6 +56,11 @@ const char *root_dir[] = {
   NULL
 };
 
+/* package status APIs */
+const char const *status_api[] = {
+  "_history", "_reason", "_status", "_log", NULL
+};
+
 regex_t build_project;
 regex_t build_project_failed;
 regex_t build_project_failed_foo;
@@ -711,9 +716,6 @@ static int get_api_dir(const char *path, void *buf, fuse_fill_dir_t filler)
            when the file is treated by obsfs_open() */
         
         /* package status APIs */
-        const char const *status_api[] = {
-          "_history", "_reason", "_status", "_log", NULL
-        };
         for (i = 0; status_api[i]; i++) {
           add_dir_node(buf, filler, newdir, path, status_api[i], &st, NULL, NULL);
         }
@@ -822,10 +824,31 @@ static int obsfs_open(const char *path, struct fuse_file_info *fi)
       effective_path = at->hardlink;
     }
 
+    /* In an expanded source directory, all files are retrieved with a
+       "rev=..." parameter (the revision is stored in the dir cache
+       entry and is added by make_url()); this is no good for the status
+       APIs, particularly _history, which would only display one revision
+       then. We therefore have to make an exception for these nodes and
+       not specify a revision when retrieving them. */
+    const char *rev;
+    if (at) {
+      const char **s;
+      rev = at->rev;
+      for (s = status_api; *s; s++) {
+        if (strstr(effective_path, *s)) {
+          rev = NULL;
+          break;
+        }
+      }
+    }
+    else
+      rev = NULL;
+    
     /* compose the full URL */
-    urlbuf = make_url(url_prefix, effective_path, at? at->rev : NULL);
+    urlbuf = make_url(url_prefix, effective_path, rev);
     
     /* retrieve the file from the API server */
+    DEBUG("getting URL %s\n", urlbuf);
     curl = curl_open_file(urlbuf, NULL, NULL, fwrite, fp);
     ret = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
