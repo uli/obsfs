@@ -1130,6 +1130,16 @@ static void *obsfs_init(struct fuse_conn_info *conn)
     abort();
   }
 
+  /* If we let libcurl create the cookie file, it will make it
+     world-readable, and there doesn't seem to be an easy way to prevent
+     that, so we just create an empty file with proper permissions here. */
+  int c = open("cookies", O_CREAT, 0600);
+  if (c < 0) {
+    perror("open");
+    abort();
+  }
+  close(c);
+  
   /* construct an URL prefix from API server host name, user name and password */
   const char *host;
   if (options.api_hostname)
