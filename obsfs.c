@@ -1126,6 +1126,46 @@ static int obsfs_unlink(const char *path)
   return 0;
 }
 
+static int obsfs_rmdir(const char *path)
+{
+  int ret, cret;
+  
+  ret = rmdir(path);
+  if (ret < 0 && errno != ENOENT) {
+    /* if it doesn't exist in the cache, that's OK, but everything else
+       is bad */
+    return -errno;
+  }
+  
+  attr_cache_remove(path);
+  dir_cache_remove(path); /* removes "path" from its parent directory */
+  /* FIXME: What about the dir cache entry of "path" itself? */
+  
+  /* OK, cached copy was removed (or didn't even exist to begin with), so we
+     can now proceed to deleting it on the server. */
+     
+  /* FIXME: This will delete a package/project on the server even if there
+     are still files in it, provided that none of these files are cached
+     locally (because then rmdir() would fail) */
+  
+  char *url = make_url(url_prefix, path, NULL);
+  CURL *curl = curl_open_file(url, NULL, NULL, write_null, NULL);
+  curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+  
+  cret = curl_easy_perform(curl);
+  curl_easy_cleanup(curl);
+  if (cret) {
+    DEBUG("RMDIR: curl error %d\n", cret);
+    if (ret) {
+      /* both rmdir() and DELETE on the server failed */
+      return -ENOENT;	/* if it was anything else, it would have failed earlier */
+    }
+    else
+      return 0;
+  }
+  return 0;
+}
+
 static void *obsfs_init(struct fuse_conn_info *conn)
 {
   /* change to the file cache directory; that way we don't have to remember it elsewhere */
@@ -1209,6 +1249,7 @@ static struct fuse_operations obsfs_oper = {
   .write = obsfs_write,
   .readlink = obsfs_readlink,
   .unlink = obsfs_unlink,
+  .rmdir = obsfs_rmdir,
 };
 
 static int obsfs_opt_proc(void *data, const char *arg, int key, struct fuse_args *outargs)
