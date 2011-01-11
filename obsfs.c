@@ -1036,6 +1036,10 @@ static int obsfs_flush(const char *path, struct fuse_file_info *fi)
     
     if (ret) {
       fprintf(stderr,"FLUSH: curl error %d\n", ret);
+      /* if the CURL upload failed, we better not rely on anything we have
+         cached locally anymore */
+      attr_cache_remove(path);
+      dir_cache_remove(path);
       return -EIO; /* as the FUSE docs point out, this is most often ignored... */
     }
     
