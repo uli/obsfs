@@ -164,3 +164,17 @@ int is_a_file(const char *path, const char *filename)
   return 0;
 }
 
+size_t string_read(char *ptr, size_t size, size_t nmemb, string_read_t *str)
+{
+  int send;
+  fprintf(stderr, "string_read %zd members of size %zd wanted\n", nmemb, size);
+  if (str->pos >= str->len)
+    send = 0;
+  else {
+    send = min(size * nmemb, str->len - str->pos);
+    memcpy(ptr, str->string + str->pos, send);
+    str->pos += send;
+  }
+  fprintf(stderr, "string_read returned %d bytes\n", send);
+  return send / size;
+}

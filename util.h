@@ -36,3 +36,12 @@ void stat_default_file(struct stat *st);
 void stat_make_symlink(struct stat *st);
 void stat_make_dir(struct stat *st);
 void stat_default_dir(struct stat *st);
+
+typedef struct {
+  off_t pos;
+  const char *string;
+  size_t len;
+} string_read_t;
+
+#define min(a, b) ((a) < (b) ? (a) : (b))
+size_t string_read(char *ptr, size_t size, size_t nmemb, string_read_t *stream);

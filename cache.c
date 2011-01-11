@@ -229,6 +229,18 @@ void dir_cache_remove(const char *path)
   }
 }
 
+void dir_cache_add_dir_by_name(const char *path)
+{
+  char *bn, *dn;
+  dn = dirname_c(path, &bn);
+  dir_t *d = dir_cache_find(dn);
+  free(dn);
+  if (d) {
+    fprintf(stderr, "%s: adding %s to %s\n", __FUNCTION__, bn, d->path);
+    dir_cache_add(d, bn, 1);
+  }
+}
+
 /* free() memory used by directory cache entries */
 void dir_cache_free(void)
 {

@@ -1166,6 +1166,135 @@ static int obsfs_rmdir(const char *path)
   return 0;
 }
 
+/* lifted straight out of osc (core.py) */
+const char new_package_templ[] =
+"<package name=\"%s\">\n"
+"\n"
+"  <title></title> <!-- Title of package -->\n"
+"\n"
+"  <description>\n"
+"<!-- for long description -->\n"
+"  </description>\n"
+"\n"
+"  <person role=\"maintainer\" userid=\"%s\"/>\n"
+"  <person role=\"bugowner\" userid=\"%s\"/>\n"
+"<!--\n"
+"  <url>PUT_UPSTREAM_URL_HERE</url>\n"
+"-->\n"
+"\n"
+"<!--\n"
+"  use one of the examples below to disable building of this package\n"
+"  on a certain architecture, in a certain repository,\n"
+"  or a combination thereof:\n"
+"\n"
+"  <disable arch=\"x86_64\"/>\n"
+"  <disable repository=\"SUSE_SLE-10\"/>\n"
+"  <disable repository=\"SUSE_SLE-10\" arch=\"x86_64\"/>\n"
+"\n"
+"  Possible sections where you can use the tags above:\n"
+"  <build>\n"
+"  </build>\n"
+"  <debuginfo>\n"
+"  </debuginfo>\n"
+"  <publish>\n"
+"  </publish>\n"
+"  <useforbuild>\n"
+"  </useforbuild>\n"
+"\n"
+"  Please have a look at:\n"
+"  http://en.opensuse.org/Restricted_formats\n"
+"  Packages containing formats listed there are NOT allowed to\n"
+"  be packaged in the openSUSE Buildservice and will be deleted!\n"
+"\n"
+"-->\n"
+"\n"
+"</package>\n";
+
+static int create_meta_file(const char *meta, const char *path)
+{
+  char *meta_path = malloc(strlen(path) + strlen("/_meta") + 1);
+  sprintf(meta_path, "%s/_meta", path);
+  char *url = make_url(url_prefix, meta_path, NULL); /* no revision here, we're creating a new one */
+  free(meta_path);
+  
+  status_t *status = xml_status_init();
+
+  string_read_t str = {0, meta, strlen(meta)};
+  
+  /* prepare for uploading the meta file */
+  CURL *curl = curl_open_file(url, string_read, &str, xml_status_write, status);
+  curl_easy_setopt(curl, CURLOPT_UPLOAD, 1);
+  
+  /* need to tell curl about the file size */
+  curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, strlen(meta));
+  
+  /* do it! */
+  int ret;
+  ret = curl_easy_perform(curl);
+  curl_easy_cleanup(curl);
+  
+  int s = xml_get_status(status);
+  xml_status_destroy(status);
+  if (s) {
+    fprintf(stderr, "MKDIR: BS status %d\n", s);
+    return -s;
+  }
+
+  if (ret) {
+    fprintf(stderr,"MKDIR: curl error %d\n", ret);
+    return -EIO;
+  }
+
+  /* Parent directory cache entry needs to be updated. We cannot simply
+     invalidate it because it might have not yet been synced to the server,
+     so we just add the new directory to it. */
+  dir_cache_add_dir_by_name(path);
+  /* If we have a dir cache entry for the parent, we also need an attr
+     cache entry for the new directory, because the canonical way to
+     fill the attribute cache is to fill the dir cache with the parent
+     directory, but that won't do anything if there is already an entry
+     for the parent. */
+  struct stat st;
+  stat_default_dir(&st);
+  attr_cache_add(path, &st, NULL, NULL, NULL);
+  
+  return 0;
+}
+
+static int obsfs_mkdir(const char *path, mode_t mode)
+{
+  /* FUSE has already checked that the parents of this directory exist, so
+     we don't have to do that.  */
+  
+  /* we do have to check if it already exists, though */
+  if (attr_cache_find(path)) {
+    return -EEXIST;
+  }
+  
+  /* Project and package creation are done by writing meta files for a
+     non-existant project or package. It has to be a valid XML file, so
+     we use the templates embedded in osc. */
+  regmatch_t match;
+  if (!regexec(&source_project, path, 1, &match, 0)) {
+    DEBUG("project generation not implemented yet");
+    return -EINVAL;
+  }
+  else if (!regexec(&source_project_package, path, 1, &match, 0)) {
+    /* create a basic meta file for this package */
+    char *package_name = strrchr(path, '/') + 1;
+    char *meta = malloc(strlen(new_package_templ) + strlen(package_name) + strlen(options.api_username) * 2);
+    sprintf(meta, new_package_templ, package_name, options.api_username, options.api_username);
+    int ret = create_meta_file(meta, path);
+    free(meta);
+    return ret;
+  }
+  else {
+    /* neither package nor project */
+    return -EPERM;
+  }
+  return 0;
+}
+
 static void *obsfs_init(struct fuse_conn_info *conn)
 {
   /* change to the file cache directory; that way we don't have to remember it elsewhere */
@@ -1250,6 +1379,7 @@ static struct fuse_operations obsfs_oper = {
   .readlink = obsfs_readlink,
   .unlink = obsfs_unlink,
   .rmdir = obsfs_rmdir,
+  .mkdir = obsfs_mkdir,
 };
 
 static int obsfs_opt_proc(void *data, const char *arg, int key, struct fuse_args *outargs)
