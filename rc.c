@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <regex.h>
-#include <glib/gbase64.h>
+#include <glib.h>
 #include <bzlib.h>
 
 #include "rc.h"
@@ -62,28 +62,39 @@ int rc_get_account(const char *server, const char *home, const char *oscrc_confi
   regex_t r;
   /* depending on the moon phase, hosts are either given as FQDN, or as HTTP or HTTPS URL */
   regcomp(&r, "^[[](https?://)?([^/]+)[]/]", REG_EXTENDED);
+  /* regexes for login ("user=...") and obfuscated password ("passx=...") */
+  regex_t pr, prx, ur;
+  regcomp(&pr, "^[[:space:]]*pass[[:space:]]*=[[:space:]]*(.*)\n$", REG_EXTENDED);
+  regcomp(&prx, "^[[:space:]]*passx[[:space:]]*=[[:space:]]*(.*)\n$", REG_EXTENDED);
+  regcomp(&ur, "^[[:space:]]*user[[:space:]]*=[[:space:]]*(.*)\n$", REG_EXTENDED);
 
   while (fgets(buf, 255, fp)) {
 next:
     if (!regexec(&r, buf, 3, matches, 0)) {
       /* is this is our host's section? */
       if (!strncmp(buf + matches[2].rm_so, server, matches[2].rm_eo - matches[2].rm_so)) {
-        /* regexes for login ("user=...") and obfuscated password ("passx=...") */
-        regex_t pr, ur;
-        regcomp(&pr, "^[[:space:]]*passx[[:space:]]*=[[:space:]]*(.*)\n$", REG_EXTENDED);
-        regcomp(&ur, "^[[:space:]]*user[[:space:]]*=[[:space:]]*(.*)\n$", REG_EXTENDED);
         
         while (fgets(buf, 255, fp)) {
           if (buf[0] == '[') {
             /* next section starts here; can't just continue the outermost loop
                because we'd skip the current line, thus the goto... */
-            regfree(&pr);
-            regfree(&ur);
             goto next;
           }
           
-          /* passx */
+          /* pass */
           if (!regexec(&pr, buf, 3, matches, 0)) {
+            if (password) {
+              continue;
+            }
+            buf[matches[1].rm_eo] = 0;
+            password = strdup(buf + matches[1].rm_so);
+            DEBUG("pass %s\n", username);
+          }
+          /* passx */
+          else if (!regexec(&prx, buf, 3, matches, 0)) {
+            if (password) {
+              continue;
+            }
             /* passx is base64-encoded bzip2-compressed plaintext. No comment... */
             gsize len;
             guchar *bz2pass = g_base64_decode(buf + matches[1].rm_so, &len);
@@ -104,12 +115,13 @@ next:
             DEBUG("user %s\n", username);
           }
         }
-        regfree(&pr);
-        regfree(&ur);
       }
     }
   }
-  
+
+  regfree(&pr);
+  regfree(&prx);
+  regfree(&ur);
   regfree(&r);
   fclose(fp);
   
