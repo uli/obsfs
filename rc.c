@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <regex.h>
-#include <glib/gbase64.h>
+#include <glib.h>
 #include <bzlib.h>
 
 #include "rc.h"
